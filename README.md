@@ -3,15 +3,15 @@
 Turn supported RGB lights into Windows screen lighting. Runs locally from one
 EXE and opens a control panel in your browser. No Echo, Home Assistant or separate server is required. Govee needs no account; Tapo uses your Tapo account to authenticate directly with the light on your local network.
 
-**0.2.0 alpha â€” Windows 10/11 x64, primary monitor only.** The H600B transport
+**0.2.1 alpha â€” Windows 10/11 x64, primary monitor only.** The H600B transport
 comes from a working hardware setup; this standalone app is an early release,
 not universal RGB support. Govee LAN output still needs physical validation.
 
 ## Download for Windows
 
-**[Download AmbientLink 0.2.0 for Windows x64](https://github.com/kubilaycakmak/AmbientLink/releases/download/v0.2.0/AmbientLink-0.2.0-windows-x64.zip)**
+**[Download AmbientLink 0.2.1 for Windows x64](https://github.com/kubilaycakmak/AmbientLink/releases/download/v0.2.1/AmbientLink-0.2.1-windows-x64.zip)**
 
-[Release notes and all downloads](https://github.com/kubilaycakmak/AmbientLink/releases/tag/v0.2.0)
+[Release notes and all downloads](https://github.com/kubilaycakmak/AmbientLink/releases/tag/v0.2.1)
 Â· [All releases](https://github.com/kubilaycakmak/AmbientLink/releases)
 
 Download the **Windows ZIP above**, not GitHub's automatically generated
@@ -20,7 +20,7 @@ Download the **Windows ZIP above**, not GitHub's automatically generated
 with it. Python is bundled; no separate Python installation is needed.
 
 The EXE opens a local control panel in your default browser. That browser tab
-is the app's interface; there is no separate native window or tray icon in 0.2.0.
+is the app's interface; there is no separate native window or tray icon in 0.2.1.
 No administrator access is required for normal use. Tapo requires its account credentials.
 
 The build is unsigned. Windows SmartScreen may show an unknown-publisher warning.
@@ -154,7 +154,7 @@ Download `SHA256SUMS.txt` from the same release. In PowerShell, compute the ZIP'
 hash and compare it with the matching filename in that checksum file:
 
 ```powershell
-Get-FileHash .\AmbientLink-0.2.0-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\AmbientLink-0.2.1-windows-x64.zip -Algorithm SHA256
 ```
 
 ## Performance and privacy
@@ -168,7 +168,7 @@ not a fully bright light. Area-filtered sampling reduces thin-text color aliasin
 only very small near-neutral color biases are neutralized. Modest symmetric black
 movie bars are cropped when the remaining content is sufficiently lit; sparse title
 cards and dark screen regions are preserved. RGB slew is limited to 300 units/s
-for normal cuts, with time-based easing on top. Brightness has a separate 550 ms minimum time constant and a 120 RGB-levels/s slew ceiling; hue changes do not create a mid-transition brightness dip. Full black still fades quickly. Per-device gamma correction is optional and model-specific.
+for normal cuts, with time-based easing on top. Rising brightness has a separate 550 ms minimum time constant and a 120 RGB-levels/s slew ceiling. Dimming keeps the normal color time constant and 300 RGB-levels/s ceiling so dark scenes do not retain bright light; hue changes do not create a mid-transition brightness dip. Full black still fades quickly. Per-device gamma correction is optional and model-specific.
 
 The UI binds to `127.0.0.1` on a random port, checks Host/Origin and requires a
 request token for changes. Images are sampled in memory; they are not saved or

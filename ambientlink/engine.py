@@ -24,8 +24,9 @@ def smooth(previous,current,dt,tau):
         value=tuple(a+d*scale for a,d in zip(old,delta))
         if not dark:
             old_peak,new_peak=max(old),max(new)
-            change=(new_peak-old_peak)*(1-math.exp(-dt/max(.55,tau)))
-            level=old_peak+max(-120*dt,min(120*dt,change))
+            level_tau=tau if new_peak<old_peak else max(.55,tau)
+            change=(new_peak-old_peak)*(1-math.exp(-dt/level_tau))
+            level=old_peak+max(-300*dt,min(120*dt,change))
             peak=max(value)
             if peak>0:value=tuple(c*level/peak for c in value)
         result.append(tuple(new) if dark and max(abs(a-b) for a,b in zip(value,new))<.5 else value)

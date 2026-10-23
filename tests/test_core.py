@@ -39,6 +39,12 @@ def test_brightness_has_a_slower_envelope_without_hue_crossfade_dips():
         assert abs(max(old[0])-255)<.0001
 
 
+def test_dark_gray_does_not_inherit_the_slow_brightening_envelope():
+    old=[(200,200,200)]*3
+    for _ in range(30):old=smooth(old,[(20,20,20)]*3,1/60,.35)
+    assert 20<max(old[0])<90
+
+
 def test_config_validation_and_persistence(tmp_path):
     config=validate({'devices':[{'driver':'govee-h600b','address':'AA:BB:CC:DD:EE:FF'}]})
     save(tmp_path/'settings.json',config);assert load(tmp_path/'settings.json')==config
