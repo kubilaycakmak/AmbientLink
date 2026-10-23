@@ -4,16 +4,16 @@ Turn supported RGB lights into Windows screen lighting. Runs locally from one
 EXE and opens a control panel in your browser. No account, cloud API, Echo,
 Home Assistant, or separate server is required.
 
-**0.1.0 alpha — Windows 10/11 x64, primary monitor only.** The H600B transport
+**0.1.1 alpha â€” Windows 10/11 x64, primary monitor only.** The H600B transport
 comes from a working hardware setup; this standalone app is an early release,
 not universal RGB support. Govee LAN output still needs physical validation.
 
 ## Download for Windows
 
-**[Download AmbientLink 0.1.0 for Windows x64](https://github.com/kubilaycakmak/AmbientLink/releases/download/v0.1.0/AmbientLink-0.1.0-windows-x64.zip)**
+**[Download AmbientLink 0.1.1 for Windows x64](https://github.com/kubilaycakmak/AmbientLink/releases/download/v0.1.1/AmbientLink-0.1.1-windows-x64.zip)**
 
-[Release notes and all downloads](https://github.com/kubilaycakmak/AmbientLink/releases/tag/v0.1.0)
-· [All releases](https://github.com/kubilaycakmak/AmbientLink/releases)
+[Release notes and all downloads](https://github.com/kubilaycakmak/AmbientLink/releases/tag/v0.1.1)
+Â· [All releases](https://github.com/kubilaycakmak/AmbientLink/releases)
 
 Download the **Windows ZIP above**, not GitHub's automatically generated
 "Source code" ZIP. Right-click the download, select **Extract All**, and run
@@ -21,7 +21,7 @@ Download the **Windows ZIP above**, not GitHub's automatically generated
 with it. Python is bundled; no separate Python installation is needed.
 
 The EXE opens a local control panel in your default browser. That browser tab
-is the app's interface; there is no separate native window or tray icon in 0.1.0.
+is the app's interface; there is no separate native window or tray icon in 0.1.1.
 No administrator access or account is required for normal use.
 
 The build is unsigned. Windows SmartScreen may show an unknown-publisher warning.
@@ -72,11 +72,11 @@ application against the same bulbs at the same time.
 | One dominant color for every light | All enabled lights follow the same representative screen color. |
 | Left / center / right regions | Each light follows the region assigned in its device row. Change the region to swap physical positions. |
 | Average screen color | Uses the screen's average color; mixed scenes can look less saturated. |
-| Brightness | Sets the overall output level. Start around 40–60% in a dim room. |
+| Brightness | Sets the overall output level. Start around 40â€“60% in a dim room. |
 | Capture FPS | Requests 15, 30 or 60 screen samples per second. This is not the number of physical light updates. |
 | Smoothing (ms) | Higher values make color changes gentler but slower. Lower values react faster. |
 | Apply color | Stops screen sync and applies the selected manual color. |
-| Device On / Off | Includes or excludes that device from output. |
+| Device Turn on / Turn off | Includes or excludes that device without reconnecting other lights. |
 
 Try a video with large, clear color areas first. For a three-light layout, assign
 one light to **Left**, one to **Center**, and one to **Right**, then select the
@@ -135,7 +135,7 @@ Download `SHA256SUMS.txt` from the same release. In PowerShell, compute the ZIP'
 hash and compare it with the matching filename in that checksum file:
 
 ```powershell
-Get-FileHash .\AmbientLink-0.1.0-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\AmbientLink-0.1.1-windows-x64.zip -Algorithm SHA256
 ```
 
 ## Performance and privacy

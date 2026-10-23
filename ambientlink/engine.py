@@ -6,6 +6,14 @@ import time
 from .drivers import REGISTRY
 
 
+async def pace(start,rate):
+    # Recheck the monotonic deadline: Windows event loops can wake timers early.
+    deadline=start+1/rate
+    while (remaining:=deadline-time.perf_counter())>0:
+        await asyncio.sleep(remaining)
+    await asyncio.sleep(0)
+
+
 def smooth(previous,current,dt,tau):
     if previous is None:return [tuple(c) for c in current]
     dt=min(.1,max(0,dt));result=[]
@@ -32,6 +40,19 @@ class Engine:
         self.state.update(active=False,mode='idle',fps=0)
         if any(isinstance(r,Exception) for r in results):self.state['error']='Some devices could not restore; check them manually'
 
+    async def configure(self,value):
+        identity=lambda settings:[(d['driver'],d['address']) for d in settings['devices']]
+        if identity(value)!=identity(self.settings):
+            await self.stop()
+            self.state['devices']=[]
+        self.settings=value
+        for client,spec in zip(self.clients,value['devices']):client.spec=spec
+
+    async def pause_stream(self):
+        if self.task:
+            self.task.cancel();await asyncio.gather(self.task,return_exceptions=True);self.task=None
+        self.latest=None
+
     def prepare(self):
         if not self.settings['devices']:raise ValueError('Add at least one supported light first')
         self.clients=[self.registry[s['driver']](s) for s in self.settings['devices']]
@@ -39,16 +60,19 @@ class Engine:
                                'transport':'BLE acknowledged' if s['driver']=='govee-h600b' else 'UDP unconfirmed'} for s in self.settings['devices']]
 
     async def start(self):
-        await self.stop();self.prepare()
+        if self.task and not self.task.done() and self.state['mode']=='screen':return
+        await self.pause_stream()
+        if not self.clients:self.prepare()
         self.state.update(active=True,mode='screen',error=None,frames=0)
         self.task=asyncio.create_task(self.stream())
 
     async def manual(self,rgb=None):
-        await self.stop();self.prepare()
+        if self.state['mode']!='manual':await self.pause_stream()
+        if not self.clients:self.prepare()
         color=rgb or self.settings['rgb'];self.latest=[color]*3
-        self.state.update(active=False,mode='manual',error=None,colors=self.latest)
+        self.state.update(active=False,mode='manual',error=None,fps=0,colors=self.latest)
         # Retain connections for keepalive and restore when stopping.
-        self.task=asyncio.create_task(self.manual_loop())
+        if not self.task or self.task.done():self.task=asyncio.create_task(self.manual_loop())
 
     async def manual_loop(self):
         tasks=[asyncio.create_task(self.sender(i)) for i in range(len(self.clients))]
@@ -58,11 +82,12 @@ class Engine:
             await asyncio.gather(*tasks,return_exceptions=True)
 
     async def sender(self,index):
-        client=self.clients[index];row=self.state['devices'][index];spec=self.settings['devices'][index]
+        client=self.clients[index];row=self.state['devices'][index]
         connected=False;failures=0;check_at=0
         while True:
             tick=time.perf_counter()
             try:
+                spec=self.settings['devices'][index]
                 if not connected:
                     await client.connect();connected=True;row.update(connected=True,error=None)
                 if self.latest is not None:
@@ -73,9 +98,9 @@ class Engine:
                     row['outputRgb']=list(rgb)
                 # H600B idle sessions need a bounded heartbeat, even on a static scene.
                 if hasattr(client,'bulb') and tick>check_at:
-                    await client.bulb.read_power();check_at=tick+5
+                    row['power']=await client.bulb.read_power();check_at=time.perf_counter()+5
                 failures=0
-                await asyncio.sleep(max(.001,1/client.rate-(time.perf_counter()-tick)))
+                await pace(tick,client.rate)
             except asyncio.CancelledError:raise
             except Exception as error:
                 connected=False;failures+=1;row.update(connected=False,error=str(error)[:180])
@@ -101,7 +126,7 @@ class Engine:
                 self.latest=[tuple(round(v) for v in color) for color in previous]
                 self.state['colors']=self.latest;frames+=1;self.state['frames']+=1
                 if tick-since>=1:self.state['fps']=round(frames/(tick-since),1);since=tick;frames=0
-                await asyncio.sleep(max(.001,1/self.settings['fps']-(time.perf_counter()-tick)))
+                await pace(tick,self.settings['fps'])
         except asyncio.CancelledError:raise
         except Exception as error:self.state.update(error=str(error)[:250],active=False,mode='error',fps=0)
         finally:

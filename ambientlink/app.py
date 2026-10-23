@@ -64,8 +64,9 @@ def create_server(root,loop,engine):
                     async with engine.lock:
                         if self.path=='/api/discover':return await discover()
                         if self.path=='/api/settings':
-                            if engine.task:raise ValueError('Stop the running scene before editing the device setup')
-                            engine.settings=settings.save(root/'settings.json',body)
+                            value=settings.validate(body)
+                            await engine.configure(value)
+                            settings.save(root/'settings.json',value)
                             return {'ok':True}
                         if self.path=='/api/start':await engine.start()
                         elif self.path=='/api/manual':await engine.manual()
@@ -96,6 +97,7 @@ def main():
         except (OSError,ValueError,KeyError):pass
         return
     loop=asyncio.new_event_loop();loop.time=__import__('time').perf_counter
+    loop._clock_resolution=__import__('time').get_clock_info('perf_counter').resolution
     thread=threading.Thread(target=run_loop,args=(loop,),daemon=True);thread.start()
     try:
         config=settings.load(root/'settings.json');engine=Engine(config)
