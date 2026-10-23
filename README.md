@@ -3,16 +3,16 @@
 Turn supported RGB lights into Windows screen lighting. Runs locally from one
 EXE and opens a control panel in your browser. No Echo, Home Assistant or separate server is required. Govee needs no account; Tapo uses your Tapo account to authenticate directly with the light on your local network.
 
-**0.2.1 alpha â€” Windows 10/11 x64, primary monitor only.** The H600B transport
+**0.2.2 alpha — Windows 10/11 x64, primary monitor only.** The H600B transport
 comes from a working hardware setup; this standalone app is an early release,
 not universal RGB support. Govee LAN output still needs physical validation.
 
 ## Download for Windows
 
-**[Download AmbientLink 0.2.1 for Windows x64](https://github.com/kubilaycakmak/AmbientLink/releases/download/v0.2.1/AmbientLink-0.2.1-windows-x64.zip)**
+**[Download AmbientLink 0.2.2 for Windows x64](https://github.com/kubilaycakmak/AmbientLink/releases/download/v0.2.2/AmbientLink-0.2.2-windows-x64.zip)**
 
-[Release notes and all downloads](https://github.com/kubilaycakmak/AmbientLink/releases/tag/v0.2.1)
-Â· [All releases](https://github.com/kubilaycakmak/AmbientLink/releases)
+[Release notes and all downloads](https://github.com/kubilaycakmak/AmbientLink/releases/tag/v0.2.2)
+· [All releases](https://github.com/kubilaycakmak/AmbientLink/releases)
 
 Download the **Windows ZIP above**, not GitHub's automatically generated
 "Source code" ZIP. Right-click the download, select **Extract All**, and run
@@ -20,7 +20,7 @@ Download the **Windows ZIP above**, not GitHub's automatically generated
 with it. Python is bundled; no separate Python installation is needed.
 
 The EXE opens a local control panel in your default browser. That browser tab
-is the app's interface; there is no separate native window or tray icon in 0.2.1.
+is the app's interface; there is no separate native window or tray icon in 0.2.2.
 No administrator access is required for normal use. Tapo requires its account credentials.
 
 The build is unsigned. Windows SmartScreen may show an unknown-publisher warning.
@@ -93,9 +93,9 @@ have not been verified on our hardware.** The 5 Hz ceiling is deliberately conse
 | One dominant color for every light | All enabled lights follow the same representative screen color. |
 | Left / center / right regions | Each light follows the region assigned in its device row. Change the region to swap physical positions. |
 | Average screen color | Uses the screen's average color; mixed scenes can look less saturated. |
-| Brightness | Sets the overall output level. Start around 40â€“60% in a dim room. |
+| Brightness | Sets the overall output level. Start around 40–60% in a dim room. |
 | Capture FPS | Requests 15, 30 or 60 screen samples per second. This is not the number of physical light updates. |
-| Smoothing (ms) | Higher values make color changes gentler but slower. Lower values react faster. |
+| Transition (ms) | Sets the finite color transition window. Start at 280–350 ms; a stable target completes within this window (minimum 180 ms), or at least 450 ms when brightening. Full black fades faster. Capture stalls and device transport add latency. |
 | Apply color | Stops screen sync and applies the selected manual color. |
 | Device Turn on / Turn off | Includes or excludes that device without reconnecting other lights. |
 
@@ -138,7 +138,7 @@ restore behavior intentionally when handing control back to another application.
 | A solid RGB color is requested | Set a solid color in Govee Home, exit that app, then retry. The app cannot safely restore every vendor scene mode. |
 | No LAN devices found | Check LAN Control and local-network reachability. Try Add LAN address using the bulb's private IPv4 address. Some networks block multicast discovery. |
 | LAN says UDP unconfirmed | The app has sent commands, but the protocol provides no delivery confirmation here. Verify the actual light response; unsupported models may ignore commands. |
-| Lights update slowly or disconnect | Reduce Capture FPS to 30, reduce radio distance, and test with one light. Bluetooth throughput varies; 60 capture FPS does not mean 60 bulb updates per second. |
+| Lights update slowly or disconnect | Compare the device update/send timings with Capture FPS, move the PC/adapter closer, and test with one light. Compare 30 and 60 capture FPS; lowering capture FPS alone does not increase radio throughput. 60 capture FPS does not mean 60 bulb updates per second. |
 | Colors look pink, washed out or inaccurate | Use Match in a dim room and compare several colors. Check LED transfer correction and reset gains if needed. HDR is not color-managed in this release. |
 | Capture stops or reports an error | Unlock Windows and click Start screen sync again. Protected video, remote sessions and display changes can prevent DXGI capture. |
 | The browser says App disconnected | Run AmbientLink.exe again. Closing the app ends its local web server. |
@@ -154,7 +154,7 @@ Download `SHA256SUMS.txt` from the same release. In PowerShell, compute the ZIP'
 hash and compare it with the matching filename in that checksum file:
 
 ```powershell
-Get-FileHash .\AmbientLink-0.2.1-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\AmbientLink-0.2.2-windows-x64.zip -Algorithm SHA256
 ```
 
 ## Performance and privacy
@@ -167,8 +167,18 @@ fade than normal cuts. Dark pixels now count toward each region's brightness:
 not a fully bright light. Area-filtered sampling reduces thin-text color aliasing;
 only very small near-neutral color biases are neutralized. Modest symmetric black
 movie bars are cropped when the remaining content is sufficiently lit; sparse title
-cards and dark screen regions are preserved. RGB slew is limited to 300 units/s
-for normal cuts, with time-based easing on top. Rising brightness has a separate 550 ms minimum time constant and a 120 RGB-levels/s slew ceiling. Dimming keeps the normal color time constant and 300 RGB-levels/s ceiling so dark scenes do not retain bright light; hue changes do not create a mid-transition brightness dip. Full black still fades quickly. Per-device gamma correction is optional and model-specific.
+cards and dark screen regions are preserved. Transitions now interpolate LED channel levels for devices with transfer correction,
+so mixed intermediate colors are not boosted back to full brightness. Each device
+has its own transition state after its RGB gains; devices with correction disabled
+use raw RGB interpolation. New samples replace the target instead of queuing old
+video colors. A stable target completes a finite ramp rather than trailing for
+seconds. Full black still fades quickly. The H600B version of this algorithm was
+compared on a live three-bulb setup; this does not validate every adapter or firmware.
+
+Each device row shows **updates/s** for changed outputs over the last three seconds
+and **ms last send** for the last transport write. These are local diagnostics, not
+optical measurements or a guaranteed hardware refresh rate. A static scene can
+correctly show zero updates/s. UDP output remains unconfirmed.
 
 The UI binds to `127.0.0.1` on a random port, checks Host/Origin and requires a
 request token for changes. Images are sampled in memory; they are not saved or

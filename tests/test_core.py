@@ -3,7 +3,7 @@ import time
 import pytest
 import numpy as np
 from ambientlink.colors import screen_colors,dominant
-from ambientlink.engine import Engine,smooth
+from ambientlink.engine import Engine
 from ambientlink.settings import validate,save,load
 from ambientlink.drivers import private_ipv4,GoveeLAN
 from ambientlink.govee_ble import encode,decode,AUTH_KEY
@@ -16,33 +16,6 @@ def test_color_regions_and_black():
     assert dominant(np.zeros((20,60,3)))==(0,0,0)
     muted=np.full((20,60,3),[80,76,70]);muted[:1]=[255,0,255]
     assert dominant(muted)==(80,76,70)
-
-
-def test_black_fade_is_fast_but_normal_cuts_are_bounded():
-    old=[(255,255,255)]*3
-    step=smooth([(255,0,0)]*3,[(0,0,255)]*3,1/60,.28)
-    assert abs(step[0][0]-255)<=8.01
-    for _ in range(15):old=smooth(old,[(0,0,0)]*3,1/60,.28)
-    assert max(old[0])<1
-
-
-def test_brightness_has_a_slower_envelope_without_hue_crossfade_dips():
-    old=[(25,25,25)]*3
-    for _ in range(30):
-        new=smooth(old,[(255,255,255)]*3,1/60,.28)
-        assert 0<=max(new[0])-max(old[0])<=2.00001
-        old=new
-    assert max(old[0])<=85.00001
-    old=[(255,0,0)]*3
-    for _ in range(60):
-        old=smooth(old,[(0,0,255)]*3,1/60,.28)
-        assert abs(max(old[0])-255)<.0001
-
-
-def test_dark_gray_does_not_inherit_the_slow_brightening_envelope():
-    old=[(200,200,200)]*3
-    for _ in range(30):old=smooth(old,[(20,20,20)]*3,1/60,.35)
-    assert 20<max(old[0])<90
 
 
 def test_config_validation_and_persistence(tmp_path):

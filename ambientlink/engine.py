@@ -1,9 +1,10 @@
 """One latest-frame sender per device: slow radios never build a frame queue."""
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-import math
 import time
+from collections import deque
 from .drivers import REGISTRY
+from .color_smoothing import LinearLightSmoother
 
 
 async def pace(start,rate):
@@ -14,37 +15,20 @@ async def pace(start,rate):
     await asyncio.sleep(0)
 
 
-def smooth(previous,current,dt,tau):
-    if previous is None:return [tuple(c) for c in current]
-    dt=min(.1,max(0,dt));result=[]
-    for old,new in zip(previous,current):
-        dark=max(new)<=5;alpha=1-math.exp(-dt/(.035 if dark else tau))
-        delta=[(b-a)*alpha for a,b in zip(old,new)];limit=(4000 if dark else 300)*dt
-        scale=min(1,limit/max(map(abs,delta))) if any(delta) else 1
-        value=tuple(a+d*scale for a,d in zip(old,delta))
-        if not dark:
-            old_peak,new_peak=max(old),max(new)
-            level_tau=tau if new_peak<old_peak else max(.55,tau)
-            change=(new_peak-old_peak)*(1-math.exp(-dt/level_tau))
-            level=old_peak+max(-300*dt,min(120*dt,change))
-            peak=max(value)
-            if peak>0:value=tuple(c*level/peak for c in value)
-        result.append(tuple(new) if dark and max(abs(a-b) for a,b in zip(value,new))<.5 else value)
-    return result
-
-
 class Engine:
     def __init__(self,settings,drivers=None,capture=None):
         self.settings=settings;self.registry=drivers or REGISTRY;self.capture_factory=capture
         self.lock=asyncio.Lock();self.task=None;self.clients=[];self.latest=None
+        self.device_latest=None;self.latest_at=None
         self.state={'active':False,'mode':'idle','fps':0,'frames':0,'error':None,'devices':[],'colors':[[0,0,0]]*3}
 
     async def stop(self,restore=True):
         if self.task:
             self.task.cancel();await asyncio.gather(self.task,return_exceptions=True);self.task=None
         results=await asyncio.gather(*(client.close(restore) for client in self.clients),return_exceptions=True)
-        self.clients=[];self.latest=None
+        self.clients=[];self.latest=None;self.device_latest=None;self.latest_at=None
         self.state.update(active=False,mode='idle',fps=0)
+        for row in self.state['devices']:row.update(connected=False,updateFps=0,frameAgeMs=None)
         if any(isinstance(r,Exception) for r in results):self.state['error']='Some devices could not restore; check them manually'
 
     async def configure(self,value):
@@ -58,7 +42,7 @@ class Engine:
     async def pause_stream(self):
         if self.task:
             self.task.cancel();await asyncio.gather(self.task,return_exceptions=True);self.task=None
-        self.latest=None
+        self.latest=None;self.device_latest=None;self.latest_at=None
 
     def prepare(self):
         if not self.settings['devices']:raise ValueError('Add at least one supported light first')
@@ -91,6 +75,7 @@ class Engine:
     async def sender(self,index):
         client=self.clients[index];row=self.state['devices'][index]
         connected=False;failures=0;check_at=0
+        updates=deque()
         while True:
             tick=time.perf_counter()
             try:
@@ -98,11 +83,23 @@ class Engine:
                 if not connected:
                     await client.connect();connected=True;row.update(connected=True,error=None)
                 if self.latest is not None:
-                    rgb=self.latest[spec['zone']]
-                    rgb=tuple(max(0,min(255,round(c*g))) for c,g in zip(rgb,spec['gains']))
+                    sampled_at=self.latest_at
+                    if self.state['mode']=='screen' and self.device_latest is not None:
+                        rgb=self.device_latest[index]
+                    else:
+                        rgb=self.latest[spec['zone']]
+                        rgb=tuple(max(0,min(255,round(c*g))) for c,g in zip(rgb,spec['gains']))
                     if not spec['enabled']:rgb=(0,0,0)
-                    if await client.send(rgb,self.settings['brightness']):row['writes']+=1
+                    send_at=time.perf_counter()
+                    if await client.send(rgb,self.settings['brightness']):
+                        row['writes']+=1
+                        now=time.perf_counter();updates.append(now)
+                        row['sendMs']=round((now-send_at)*1000,1)
+                        row['frameAgeMs']=round((now-sampled_at)*1000,1) if sampled_at is not None else None
                     row['outputRgb']=list(rgb)
+                now=time.perf_counter()
+                while updates and now-updates[0]>3:updates.popleft()
+                row['updateFps']=round(len(updates)/3,1)
                 # H600B idle sessions need a bounded heartbeat, even on a static scene.
                 if hasattr(client,'bulb') and tick>check_at:
                     row['power']=await client.bulb.read_power();check_at=time.perf_counter()+5
@@ -110,14 +107,15 @@ class Engine:
                 await pace(tick,client.rate)
             except asyncio.CancelledError:raise
             except Exception as error:
-                connected=False;failures+=1;row.update(connected=False,error=str(error)[:180])
+                connected=False;failures+=1;updates.clear();row.update(connected=False,error=str(error)[:180],updateFps=0)
                 try:await client.close(False)
                 except Exception:pass  # A failed disconnect must not disable reconnects.
                 await asyncio.sleep(min(10,failures))
 
     async def stream(self):
         tasks=[asyncio.create_task(self.sender(i)) for i in range(len(self.clients))]
-        loop=asyncio.get_running_loop();manager=None;entered=False;previous=None;last=time.perf_counter();frames=0;since=last
+        loop=asyncio.get_running_loop();manager=None;entered=False;last=time.perf_counter();frames=0;since=last
+        smoothers=[LinearLightSmoother(self.settings['smoothing']/1000,spec['gamma']) for spec in self.settings['devices']]
         executor=ThreadPoolExecutor(max_workers=1,thread_name_prefix='capture')
         try:
             if self.capture_factory:manager=self.capture_factory()
@@ -129,8 +127,17 @@ class Engine:
             while True:
                 tick=time.perf_counter()
                 current=await loop.run_in_executor(executor,camera.colors,self.settings['mode'])
-                previous=smooth(previous,current,tick-last,self.settings['smoothing']/1000);last=tick
-                self.latest=[tuple(round(v) for v in color) for color in previous]
+                outputs=[]
+                for i,spec in enumerate(self.settings['devices']):
+                    if smoothers[i].corrected!=spec['gamma']:
+                        smoothers[i]=LinearLightSmoother(corrected=spec['gamma'])
+                    smoothers[i].tau=self.settings['smoothing']/1000
+                    target=tuple(max(0,min(255,round(c*g))) for c,g in zip(current[spec['zone']],spec['gains']))
+                    value=smoothers[i].update([target],tick-last)[0]
+                    outputs.append(tuple(round(v) for v in value))
+                last=tick
+                self.latest=[tuple(c) for c in current]
+                self.device_latest=outputs;self.latest_at=tick
                 self.state['colors']=self.latest;frames+=1;self.state['frames']+=1
                 if tick-since>=1:self.state['fps']=round(frames/(tick-since),1);since=tick;frames=0
                 await pace(tick,self.settings['fps'])
@@ -143,3 +150,4 @@ class Engine:
             executor.shutdown(wait=True)
             if self.state['mode']=='error':
                 await asyncio.gather(*(c.close(True) for c in self.clients),return_exceptions=True)
+                for row in self.state['devices']:row.update(connected=False,updateFps=0,frameAgeMs=None)

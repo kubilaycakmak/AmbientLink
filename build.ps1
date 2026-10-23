@@ -1,5 +1,8 @@
 $ErrorActionPreference='Stop'
 Set-Location $PSScriptRoot
+$releaseVersion = & .\.venv\Scripts\python.exe -c 'from ambientlink import __version__; print(__version__)'
+if ($LASTEXITCODE -or $releaseVersion -notmatch '^\d+\.\d+\.\d+$') {throw 'Invalid release version'}
+$releaseZip = "dist/AmbientLink-$releaseVersion-windows-x64.zip"
 & .\.venv\Scripts\python.exe -m pytest -q
 if ($LASTEXITCODE) {throw 'Tests failed'}
 & .\.venv\Scripts\python.exe collect_licenses.py
@@ -9,5 +12,5 @@ if ($LASTEXITCODE) {throw 'Packaging failed'}
 Get-FileHash .\dist\AmbientLink.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  AmbientLink.exe" } | Set-Content .\dist\SHA256SUMS.txt
 Copy-Item README.md,LICENSE,THIRD_PARTY.md dist/
 Copy-Item build/third-party-licenses dist/ -Recurse -Force
-Compress-Archive -Path dist/AmbientLink.exe,dist/SHA256SUMS.txt,dist/README.md,dist/LICENSE,dist/THIRD_PARTY.md,dist/third-party-licenses -DestinationPath dist/AmbientLink-0.2.1-windows-x64.zip -Force
-Get-FileHash .\dist\AmbientLink.exe,.\dist\AmbientLink-0.2.1-windows-x64.zip -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $([System.IO.Path]::GetFileName($_.Path))" } | Set-Content .\dist\SHA256SUMS.txt
+Compress-Archive -Path dist/AmbientLink.exe,dist/SHA256SUMS.txt,dist/README.md,dist/LICENSE,dist/THIRD_PARTY.md,dist/third-party-licenses -DestinationPath $releaseZip -Force
+Get-FileHash .\dist\AmbientLink.exe,$releaseZip -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $([System.IO.Path]::GetFileName($_.Path))" } | Set-Content .\dist\SHA256SUMS.txt
