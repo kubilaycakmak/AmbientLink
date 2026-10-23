@@ -19,9 +19,15 @@ def smooth(previous,current,dt,tau):
     dt=min(.1,max(0,dt));result=[]
     for old,new in zip(previous,current):
         dark=max(new)<=5;alpha=1-math.exp(-dt/(.035 if dark else tau))
-        delta=[(b-a)*alpha for a,b in zip(old,new)];limit=(4000 if dark else 480)*dt
+        delta=[(b-a)*alpha for a,b in zip(old,new)];limit=(4000 if dark else 300)*dt
         scale=min(1,limit/max(map(abs,delta))) if any(delta) else 1
         value=tuple(a+d*scale for a,d in zip(old,delta))
+        if not dark:
+            old_peak,new_peak=max(old),max(new)
+            change=(new_peak-old_peak)*(1-math.exp(-dt/max(.55,tau)))
+            level=old_peak+max(-120*dt,min(120*dt,change))
+            peak=max(value)
+            if peak>0:value=tuple(c*level/peak for c in value)
         result.append(tuple(new) if dark and max(abs(a-b) for a,b in zip(value,new))<.5 else value)
     return result
 
@@ -57,7 +63,7 @@ class Engine:
         if not self.settings['devices']:raise ValueError('Add at least one supported light first')
         self.clients=[self.registry[s['driver']](s) for s in self.settings['devices']]
         self.state['devices']=[{'name':s['name'],'connected':False,'error':None,'writes':0,'outputRgb':[0,0,0],
-                               'transport':'BLE acknowledged' if s['driver']=='govee-h600b' else 'UDP unconfirmed'} for s in self.settings['devices']]
+                               'transport':getattr(c,'transport','BLE acknowledged' if s['driver']=='govee-h600b' else 'UDP unconfirmed')} for s,c in zip(self.settings['devices'],self.clients)]
 
     async def start(self):
         if self.task and not self.task.done() and self.state['mode']=='screen':return

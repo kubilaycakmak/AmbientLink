@@ -4,3 +4,4 @@ Pillow==13.0.0
 dxcam==0.3.0
 numpy==2.5.4
 comtypes==1.4.17
+tapo==0.11.1

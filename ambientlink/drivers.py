@@ -1,4 +1,4 @@
-"""Small local-device adapter interface. No account or cloud credentials."""
+"""Small local-device adapter interface; Tapo uses local account authentication."""
 import asyncio
 import ipaddress
 import json
@@ -6,6 +6,7 @@ import socket
 import time
 from .govee_ble import Bulb
 from .led_color import led_output
+from .tapo_driver import TapoL530
 
 
 def private_ipv4(value):
@@ -83,7 +84,7 @@ class GoveeLAN:
         if self.sock:self.sock.close();self.sock=None
 
 
-REGISTRY={'govee-h600b':H600B,'govee-lan':GoveeLAN}
+REGISTRY={'govee-h600b':H600B,'govee-lan':GoveeLAN,'tapo-l530':TapoL530}
 
 
 def lan_discover():

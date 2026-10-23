@@ -15,6 +15,8 @@ from . import __version__
 from . import settings
 from .drivers import discover
 from .engine import Engine
+from .credentials import Credentials
+from .tapo_driver import TapoL530
 
 
 def run_loop(loop):
@@ -26,6 +28,10 @@ def run_loop(loop):
 
 def create_server(root,loop,engine):
     token=secrets.token_urlsafe(32)
+    credentials=Credentials(root)
+    engine.registry=dict(engine.registry)
+    if engine.registry.get('tapo-l530') is TapoL530:
+        engine.registry['tapo-l530']=lambda spec:TapoL530(spec,credentials)
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*args):pass
         def setup(self):super().setup();self.connection.settimeout(10)
@@ -46,7 +52,7 @@ def create_server(root,loop,engine):
                 return self.reply(200,html.encode(),'text/html')
             if self.path=='/api/state':
                 # Retrieve a consistent snapshot on the controller loop.
-                async def snapshot():return {'settings':copy.deepcopy(engine.settings),'state':copy.deepcopy(engine.state)}
+                async def snapshot():return {'settings':copy.deepcopy(engine.settings),'state':copy.deepcopy(engine.state),'tapoAccountSaved':credentials.configured}
                 future=asyncio.run_coroutine_threadsafe(snapshot(),loop)
                 return self.reply(200,future.result(timeout=3))
             self.reply(404,{'error':'Not found'})
@@ -62,6 +68,12 @@ def create_server(root,loop,engine):
                 if not isinstance(body,dict):raise ValueError('Invalid request')
                 async def command():
                     async with engine.lock:
+                        if self.path=='/api/tapo/account':
+                            if any(s['driver']=='tapo-l530' for s in engine.settings['devices']):
+                                await engine.stop()
+                            if body.get('forget') is True:credentials.forget()
+                            else:credentials.save(body.get('username'),body.get('password'))
+                            return {'ok':True,'configured':credentials.configured}
                         if self.path=='/api/discover':return await discover()
                         if self.path=='/api/settings':
                             value=settings.validate(body)

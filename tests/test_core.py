@@ -26,6 +26,19 @@ def test_black_fade_is_fast_but_normal_cuts_are_bounded():
     assert max(old[0])<1
 
 
+def test_brightness_has_a_slower_envelope_without_hue_crossfade_dips():
+    old=[(25,25,25)]*3
+    for _ in range(30):
+        new=smooth(old,[(255,255,255)]*3,1/60,.28)
+        assert 0<=max(new[0])-max(old[0])<=2.00001
+        old=new
+    assert max(old[0])<=85.00001
+    old=[(255,0,0)]*3
+    for _ in range(60):
+        old=smooth(old,[(0,0,255)]*3,1/60,.28)
+        assert abs(max(old[0])-255)<.0001
+
+
 def test_config_validation_and_persistence(tmp_path):
     config=validate({'devices':[{'driver':'govee-h600b','address':'AA:BB:CC:DD:EE:FF'}]})
     save(tmp_path/'settings.json',config);assert load(tmp_path/'settings.json')==config

@@ -1,18 +1,17 @@
 # AmbientLink
 
 Turn supported RGB lights into Windows screen lighting. Runs locally from one
-EXE and opens a control panel in your browser. No account, cloud API, Echo,
-Home Assistant, or separate server is required.
+EXE and opens a control panel in your browser. No Echo, Home Assistant or separate server is required. Govee needs no account; Tapo uses your Tapo account to authenticate directly with the light on your local network.
 
-**0.1.1 alpha â€” Windows 10/11 x64, primary monitor only.** The H600B transport
+**0.2.0 alpha â€” Windows 10/11 x64, primary monitor only.** The H600B transport
 comes from a working hardware setup; this standalone app is an early release,
 not universal RGB support. Govee LAN output still needs physical validation.
 
 ## Download for Windows
 
-**[Download AmbientLink 0.1.1 for Windows x64](https://github.com/kubilaycakmak/AmbientLink/releases/download/v0.1.1/AmbientLink-0.1.1-windows-x64.zip)**
+**[Download AmbientLink 0.2.0 for Windows x64](https://github.com/kubilaycakmak/AmbientLink/releases/download/v0.2.0/AmbientLink-0.2.0-windows-x64.zip)**
 
-[Release notes and all downloads](https://github.com/kubilaycakmak/AmbientLink/releases/tag/v0.1.1)
+[Release notes and all downloads](https://github.com/kubilaycakmak/AmbientLink/releases/tag/v0.2.0)
 Â· [All releases](https://github.com/kubilaycakmak/AmbientLink/releases)
 
 Download the **Windows ZIP above**, not GitHub's automatically generated
@@ -21,8 +20,8 @@ Download the **Windows ZIP above**, not GitHub's automatically generated
 with it. Python is bundled; no separate Python installation is needed.
 
 The EXE opens a local control panel in your default browser. That browser tab
-is the app's interface; there is no separate native window or tray icon in 0.1.1.
-No administrator access or account is required for normal use.
+is the app's interface; there is no separate native window or tray icon in 0.2.0.
+No administrator access is required for normal use. Tapo requires its account credentials.
 
 The build is unsigned. Windows SmartScreen may show an unknown-publisher warning.
 Download only from this repository's Releases page and verify the release hash
@@ -43,6 +42,7 @@ if needed. Checksums identify a file; they do not establish publisher identity.
 | --- | --- | --- |
 | Govee H600B | Based on live-tested encrypted BLE transport | Bluetooth LE, acknowledged writes, up to 30 Hz |
 | Govee LAN Control | Experimental; model and firmware dependent, physical validation pending | Local UDP, up to 10 Hz; no delivery acknowledgement |
+| Tapo L530 / L530E | Experimental adapter; **not physically tested** | Authenticated local LAN, capped at 5 requests/s; actual rate depends on firmware/network |
 | Other Govee BLE models / other brands | Not yet supported | Add a model-specific adapter |
 
 Bluetooth and Wi-Fi are transports, not a common lighting protocol. A device
@@ -64,6 +64,27 @@ For H600B, set the bulb to a **solid RGB color** in Govee Home once before the
 first connection, then close Govee Home and other light controllers. You do not
 need to remove the bulb from your Govee account. Do not run another Ambilight
 application against the same bulbs at the same time.
+
+### Add a Tapo L530E (experimental)
+
+1. Set up the bulb in the Tapo phone app and select a solid color. AmbientLink does not pair an unconfigured bulb or restore dynamic effects.
+2. Put the PC and bulb on the same reachable local network. Find the bulb's private IPv4 address in your router or Tapo device information; a DHCP reservation prevents address changes.
+3. Click **Add Tapo**, enter that IP, a name, and the email/password used in Tapo. This is local device authentication, not an AmbientLink account. If connection fails, also check the Tapo **Third-Party Compatibility** setting available on some firmware.
+4. Click **Save & add light**, select its screen region, then **Start screen sync** or **Apply color**. Adding a row alone does not verify connectivity. The device row shows connection failures.
+5. Use **Add Tapo → Forget account** to remove the saved credentials. Changing/removing the account stops active Tapo control. One saved Tapo account is shared by added Tapo lights.
+
+Credentials are encrypted with Windows DPAPI for the current user in
+`%LOCALAPPDATA%/AmbientLink/tapo-credentials.dpapi`. They are not returned by the
+panel API, written to `settings.json`, included in exports, or shipped in releases.
+Do not share this file. Moving the app to another Windows account requires entering
+credentials again. Gamma correction starts disabled for Tapo; use **Match** only
+if needed. Neutral RGB uses the bulb's 6500 K white mode.
+
+The adapter uses the MIT-licensed [tapo client](https://github.com/mihai-dinculescu/tapo).
+Command conversion, deduplication, reconnect/restore and secret storage have automated
+tests. **L530E physical response, firmware compatibility and sustained update rate
+have not been verified on our hardware.** The 5 Hz ceiling is deliberately conservative;
+60 capture FPS does not mean 60 Tapo updates per second.
 
 ### Choose how colors follow the screen
 
@@ -99,9 +120,7 @@ cannot guarantee colorimeter-level accuracy.
 
 ### Stop, switch off, or exit
 
-**Stop & restore** restores the captured H600B solid-color/power state where the
-connection is still available. LAN devices keep their last output, because this
-version does not have verified original-state readback. **Lights off** explicitly
+**Stop & restore** restores the captured H600B or Tapo solid-color/white-temperature, brightness and power state while the connection is available. Govee LAN devices keep their last output because that adapter has no verified original-state readback. **Lights off** explicitly
 sends black/power-off. **Quit app** stops the worker and closes its connections.
 Closing the browser tab alone leaves the app running; reopening the EXE returns
 to its panel. No startup task is installed and screen capture never starts merely
@@ -135,7 +154,7 @@ Download `SHA256SUMS.txt` from the same release. In PowerShell, compute the ZIP'
 hash and compare it with the matching filename in that checksum file:
 
 ```powershell
-Get-FileHash .\AmbientLink-0.1.1-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\AmbientLink-0.2.0-windows-x64.zip -Algorithm SHA256
 ```
 
 ## Performance and privacy
@@ -143,7 +162,13 @@ Get-FileHash .\AmbientLink-0.1.1-windows-x64.zip -Algorithm SHA256
 Capture targets 15/30/60 FPS. Hardware update rates depend on the radio, firmware,
 and number of lights. Each light has an independent sender with only the latest
 target; no queue of stale video colors is accumulated. Black scenes have a faster
-fade than normal cuts. Per-device gamma correction is optional and model-specific.
+fade than normal cuts. Dark pixels now count toward each region's brightness:
+10% white text on a 90% black background produces approximately 10% white output,
+not a fully bright light. Area-filtered sampling reduces thin-text color aliasing;
+only very small near-neutral color biases are neutralized. Modest symmetric black
+movie bars are cropped when the remaining content is sufficiently lit; sparse title
+cards and dark screen regions are preserved. RGB slew is limited to 300 units/s
+for normal cuts, with time-based easing on top. Brightness has a separate 550 ms minimum time constant and a 120 RGB-levels/s slew ceiling; hue changes do not create a mid-transition brightness dip. Full black still fades quickly. Per-device gamma correction is optional and model-specific.
 
 The UI binds to `127.0.0.1` on a random port, checks Host/Origin and requires a
 request token for changes. Images are sampled in memory; they are not saved or

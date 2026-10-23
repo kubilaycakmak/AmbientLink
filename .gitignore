@@ -6,6 +6,7 @@ __pycache__/
 *.pyc
 *.spec
 *.private.json
+*.dpapi
 settings.json
 instance.json
 last-error.txt

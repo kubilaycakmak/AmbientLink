@@ -11,6 +11,8 @@ licenses; an executable distribution must include their installed license texts.
 - NumPy: BSD-3-Clause, with bundled component notices. https://github.com/numpy/numpy
 - Pillow: HPND and bundled codec notices. https://github.com/python-pillow/Pillow
 - DXcam: MIT. https://github.com/ra1nty/DXcam
+- tapo: MIT. Includes its Rust/PyO3 native client. https://github.com/mihai-dinculescu/tapo
+- tzdata: Apache-2.0 with IANA time-zone data notices. https://github.com/python/tzdata
 - comtypes: MIT. https://github.com/enthought/comtypes
 - PyInstaller: GPL-2.0-or-later with its bootloader exception allowing distribution
   of bundled applications under their own license. https://pyinstaller.org/

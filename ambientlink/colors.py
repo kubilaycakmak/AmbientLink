@@ -2,12 +2,12 @@
 import numpy as np
 
 
-def dominant(sample):
+def _hue(sample):
     pixels = np.asarray(sample, dtype=np.float32).reshape(-1, 3)
     if not len(pixels):
         return (0, 0, 0)
     value = pixels.max(axis=1)
-    usable = value > 12  # Letterbox bars must not dilute the scene.
+    usable = value > 12
     if usable.sum() < max(1, len(pixels) * .015):
         return (0, 0, 0)
     pixels, value = pixels[usable], value[usable]
@@ -45,7 +45,45 @@ def dominant(sample):
     return tuple(int(round(v)) for v in color)
 
 
+def dominant(sample):
+    """Choose a hue by area, but keep the whole region's light level."""
+    pixels = np.asarray(sample, dtype=np.float32).reshape(-1, 3)
+    if not len(pixels):
+        return (0, 0, 0)
+    color = np.asarray(_hue(sample), dtype=np.float32)
+    peak = float(color.max())
+    if peak <= 0:
+        return (0, 0, 0)
+    # Dark pixels count toward brightness, even though they have no useful hue.
+    # Small subtitles/highlights must never light an otherwise black region fully.
+    level = min(peak, float(pixels.max(axis=1).mean()))
+    # Suppress tiny neutral fringes before device gamma amplifies them. Keep
+    # visibly colored scenes intact; this is not a guessed hardware white point.
+    if (peak-float(color.min()))/peak <= .06:
+        color[:] = peak
+    return tuple(int(round(v)) for v in color * (level/peak))
+
+
+def content_area(rgb):
+    """Remove modest symmetric horizontal letterboxing, never isolated text."""
+    rgb = np.asarray(rgb)
+    if rgb.ndim != 3 or not rgb.shape[0] or not rgb.shape[1]:
+        return rgb
+    lit = rgb.max(axis=2) > 12
+    rows = lit.any(axis=1)
+    indices = np.flatnonzero(rows)
+    if not len(indices):
+        return rgb
+    top, bottom = int(indices[0]), len(rows)-1-int(indices[-1])
+    if (top >= 2 and bottom >= 2 and abs(top-bottom) <= 2
+            and max(top,bottom) <= len(rows)*.24
+            and lit[top:len(rows)-bottom].mean() >= .45):
+        return rgb[top:len(rows)-bottom]
+    return rgb
+
+
 def screen_colors(rgb, mode="zones"):
+    rgb = content_area(rgb)
     if mode == "average":
         result = tuple(int(round(v)) for v in np.asarray(rgb).mean(axis=(0,1)))
         return [result]*3

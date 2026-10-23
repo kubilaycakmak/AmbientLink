@@ -105,9 +105,15 @@ class PrimaryCapture:
         frame = self.camera.grab(new_frame_only=False, copy=False)
         if frame is None:
             raise OSError("Primary screen is unavailable")
-        # Explicit BGR -> RGB conversion on a small uniform sample (not full-frame).
-        step_y, step_x = max(1,frame.shape[0]//90), max(1,frame.shape[1]//160)
-        return screen_colors(frame[::step_y,::step_x,2::-1], mode)
+        # Area filtering includes thin text and its background instead of picking
+        # individual colored subpixels. Convert BGR only after shrinking.
+        import numpy as np
+        height,width = frame.shape[:2]
+        # Ignore DXGI's unused alpha byte. RGBA resizing needlessly performs
+        # alpha premultiplication across millions of pixels every frame.
+        image = Image.frombuffer('RGBX',(width,height),frame,'raw','RGBX',0,1)
+        small = image.reduce((max(1,width//160),max(1,height//90)))
+        return screen_colors(np.asarray(small)[... ,2::-1], mode)
 
     def color(self):
         return self.colors("dominant")[1]
