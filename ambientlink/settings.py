@@ -3,7 +3,7 @@ import math
 import re
 from .drivers import REGISTRY,private_ipv4
 
-DEFAULT={'devices':[],'mode':'dominant','brightness':60,'fps':60,'smoothing':280,'rgb':[255,170,60]}
+DEFAULT={'devices':[],'mode':'dominant','brightness':60,'fps':60,'smoothing':350,'rgb':[255,170,60]}
 
 
 def validate(value):

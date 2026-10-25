@@ -3,15 +3,15 @@
 Turn supported RGB lights into Windows screen lighting. Runs locally from one
 EXE and opens a control panel in your browser. No Echo, Home Assistant or separate server is required. Govee needs no account; Tapo uses your Tapo account to authenticate directly with the light on your local network.
 
-**0.3.0 alpha — Windows 10/11 x64, primary monitor only.** The H600B transport
+**0.3.1 alpha — Windows 10/11 x64, primary monitor only.** The H600B transport
 comes from a working hardware setup; this standalone app is an early release,
 not universal RGB support. Govee LAN output still needs physical validation.
 
 ## Download for Windows
 
-**[Download AmbientLink 0.3.0 for Windows x64](https://github.com/kubilaycakmak/AmbientLink/releases/download/v0.3.0/AmbientLink-0.3.0-windows-x64.zip)**
+**[Download AmbientLink 0.3.1 for Windows x64](https://github.com/kubilaycakmak/AmbientLink/releases/download/v0.3.1/AmbientLink-0.3.1-windows-x64.zip)**
 
-[Release notes and all downloads](https://github.com/kubilaycakmak/AmbientLink/releases/tag/v0.3.0)
+[Release notes and all downloads](https://github.com/kubilaycakmak/AmbientLink/releases/tag/v0.3.1)
 · [All releases](https://github.com/kubilaycakmak/AmbientLink/releases)
 
 Download the **Windows ZIP above**, not GitHub's automatically generated
@@ -20,7 +20,7 @@ Download the **Windows ZIP above**, not GitHub's automatically generated
 with it. Python is bundled; no separate Python installation is needed.
 
 The EXE opens a local control panel in your default browser. That browser tab
-is the app's interface; there is no separate native window or tray icon in 0.3.0.
+is the app's interface; there is no separate native window or tray icon in 0.3.1.
 No administrator access is required for normal use. Tapo requires its account credentials.
 
 The build is unsigned. Windows SmartScreen may show an unknown-publisher warning.
@@ -42,7 +42,7 @@ if needed. Checksums identify a file; they do not establish publisher identity.
 | --- | --- | --- |
 | Govee H600B | Based on live-tested encrypted BLE transport | Bluetooth LE, acknowledged writes, up to 30 Hz |
 | Govee LAN Control | Experimental; model and firmware dependent, physical validation pending | Local UDP, up to 10 Hz; no delivery acknowledgement |
-| Tapo L530 / L530E | Experimental adapter; **not physically tested** | Authenticated local LAN, capped at 5 requests/s; actual rate depends on firmware/network |
+| Tapo L530 / L530E | Experimental adapter; **not physically tested** | Authenticated local LAN, adaptive, up to 10 requests/s; actual rate depends on firmware/network |
 | Other Govee BLE models / other brands | Not yet supported | Add a model-specific adapter |
 
 Bluetooth and Wi-Fi are transports, not a common lighting protocol. A device
@@ -83,7 +83,7 @@ if needed. Neutral RGB uses the bulb's 6500 K white mode.
 The adapter uses the MIT-licensed [tapo client](https://github.com/mihai-dinculescu/tapo).
 Command conversion, deduplication, reconnect/restore and secret storage have automated
 tests. **L530E physical response, firmware compatibility and sustained update rate
-have not been verified on our hardware.** The 5 Hz ceiling is deliberately conservative;
+have not been verified on our hardware.** The adaptive 10 Hz ceiling is a software limit, not a measured physical rate;
 60 capture FPS does not mean 60 Tapo updates per second.
 
 ### Choose how colors follow the screen
@@ -95,7 +95,7 @@ have not been verified on our hardware.** The 5 Hz ceiling is deliberately conse
 | Average screen color | Uses the screen's average color; mixed scenes can look less saturated. |
 | Brightness | Sets the overall output level. Start around 40–60% in a dim room. |
 | Capture FPS | Requests 15, 30 or 60 screen samples per second. This is not the number of physical light updates. |
-| Transition (ms) | Sets the finite color transition window. Start at 280–350 ms; a stable target completes within this window (minimum 180 ms), or at least 450 ms when brightening. Full black fades faster. Capture stalls and device transport add latency. |
+| Transition (ms) | Sets the finite color transition window. Defaults to 350 ms; a stable target completes within this window (minimum 180 ms), or at least 450 ms when brightening. Full black fades faster. Capture stalls and device transport add latency. |
 | Apply color | Stops screen sync and applies the selected manual color. |
 | Device Turn on / Turn off | Includes or excludes that device without reconnecting other lights. |
 
@@ -170,11 +170,18 @@ To erase local history, quit AmbientLink and delete that diagnostics folder.
 
 L530E uses local 2.4 GHz Wi-Fi. Wi-Fi itself does not establish whether a light is
 faster or slower than Bluetooth. This adapter waits for command acknowledgement
-and deliberately caps sends at **5 Hz** (at least 200 ms between command starts).
-Slower replies reduce the rate further. Capture FPS, the Transition setting, the
+and now automatically adjusts sends up to **10 Hz** (at least 100 ms between command starts).
+Slower replies reduce the rate with headroom; failed writes reduce it further,
+then successful replies gradually restore the rate. There is one in-flight
+command per bulb, and the next send uses the newest target. Capture FPS, the Transition setting, the
 network, device processing and firmware fade behavior can all contribute to what
-you see. This release adds measurements; it does **not** claim to fix a physically
-unverified Tapo latency problem or increase that limit.
+you see. The optimized sender is the default for existing and new Tapo lights. New
+settings use 60 capture FPS and a 350 ms transition; saved timing/calibration
+choices are preserved. The area-weighted dark-scene filter and bounded,
+non-overshooting crossfades used by H600B are shared across adapters.
+Hardware-specific gamma/gains are not blindly copied between bulb models.
+This reduces the previous software ceiling but does **not** establish physical
+Tapo performance without a real-device report.
 
 - Compare **Apply color** with screen sync. Manual color skips screen capture and
   interpolation, helping separate those from transport/device delay.
@@ -191,7 +198,7 @@ Download `SHA256SUMS.txt` from the same release. In PowerShell, compute the ZIP'
 hash and compare it with the matching filename in that checksum file:
 
 ```powershell
-Get-FileHash .\AmbientLink-0.3.0-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\AmbientLink-0.3.1-windows-x64.zip -Algorithm SHA256
 ```
 
 ## Performance and privacy

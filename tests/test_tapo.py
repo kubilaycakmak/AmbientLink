@@ -95,3 +95,45 @@ def test_native_tapo_binding_has_the_builder_api_used_by_adapter():
     assert callable(tapo.ApiClient.l530) and callable(tapo.ColorLightHandler.set)
     for method in ('on','off','brightness','hue_saturation','color_temperature','send'):
         assert callable(getattr(LightSetDeviceInfoParams,method))
+
+
+def test_tapo_defaults_adapt_to_acknowledgements_and_back_off_on_failure(monkeypatch):
+    import ambientlink.tapo_driver as module
+    clock=[100.]
+    monkeypatch.setattr(module.time,'perf_counter',lambda:clock[0])
+    async def run():
+        device=Device();driver=adapter(device)
+        assert driver.rate==10
+        delay=[.03];fail=[False]
+        class TimedRequest(Request):
+            async def send(self,device):
+                clock[0]+=delay[0]
+                if fail[0]:raise TimeoutError('private SDK message')
+                await super().send(device)
+        device.set=TimedRequest
+        await driver.connect();await driver.send((255,0,0),60)
+        assert driver.rate==10  # fast replies are no longer artificially capped at 5
+        delay[0]=.4
+        for i in range(10):await driver.send((0,255,i*10),60)
+        assert 1<=driver.rate<3 and 1/driver.rate>.4  # breathing room for a slow bulb
+        before=driver.rate;fail[0]=True
+        with pytest.raises(ValueError):await driver.send((0,0,255),60)
+        assert driver.rate<before
+        await driver.close(False);fail[0]=False;delay[0]=.02
+        await driver.connect()
+        throttled=driver.rate
+        await driver.send((255,10,0),60)
+        assert driver.rate<=throttled  # no immediate burst after a successful retry
+        clock[0]+=10
+        for i in range(25):await driver.send((255,i*5,0),60)
+        assert driver.rate==10  # recovers automatically, without user tuning
+    asyncio.run(run())
+
+
+def test_shared_screen_defaults_preserve_explicit_calibration():
+    defaults=validate({'devices':[{'driver':'tapo-l530','address':'192.168.1.50'}]})
+    assert defaults['fps']==60 and defaults['smoothing']==350
+    # Color transfer is model-dependent: don't force H600B calibration onto Tapo.
+    customized=validate({**defaults,'smoothing':200,'devices':[{**defaults['devices'][0],'gains':[1,.8,.6],'gamma':True}]})
+    assert customized['smoothing']==200 and customized['devices'][0]['gains']==[1,.8,.6]
+    assert customized['devices'][0]['gamma'] is True

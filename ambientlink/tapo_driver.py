@@ -1,17 +1,29 @@
 """Experimental L530/L530E local LAN adapter using the MIT tapo client."""
 import asyncio
 import colorsys
+import time
 from .led_color import led_output
 from .diagnostics import DeviceError
 
 
 class TapoL530:
-    rate=5  # Conservative request ceiling, NOT a measured hardware frame rate.
+    max_rate=10  # Upper bound, not a promise of physical bulb FPS.
+    rate=10
     transport='Tapo LAN acknowledged · experimental'
 
     def __init__(self,spec,credentials=None,client_factory=None):
         self.spec=spec;self.credentials=credentials;self.factory=client_factory
         self.client=None;self.device=None;self.original=None;self.last=None
+        self.response_seconds=None
+        self.rate_hold_until=0.
+
+    def observe_response(self,seconds):
+        # Keep one acknowledged command in flight and leave 15% headroom on
+        # slower bulbs. Never queue intermediate colors to chase the ceiling.
+        self.response_seconds=seconds if self.response_seconds is None else .7*self.response_seconds+.3*seconds
+        capacity=min(self.max_rate,1/max(.001,self.response_seconds*1.15))
+        ceiling=self.rate if time.perf_counter()<self.rate_hold_until else self.rate*1.25
+        self.rate=max(1,min(capacity,ceiling))
 
     async def connect(self):
         if self.credentials is None:raise DeviceError('Use Add Tapo to save your Tapo account first','tapo_account')
@@ -55,8 +67,12 @@ class TapoL530:
                 # device white channel for neutral input (D65 reference).
                 request=(request.color_temperature(6500) if saturation==0 else request.hue_saturation(hue,saturation))
                 request=request.brightness(dim).on()
+            started=time.perf_counter()
             await asyncio.wait_for(request.send(self.device),3)
+            self.observe_response(time.perf_counter()-started)
         except Exception as error:
+            self.rate=max(1,self.rate/2)
+            self.rate_hold_until=time.perf_counter()+10
             raise DeviceError('Tapo did not acknowledge the light update; reconnecting','tapo_update',error) from None
         self.last=value
         return True

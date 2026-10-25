@@ -25,7 +25,7 @@ KINDS = {'session', 'start', 'manual', 'stop', 'connected', 'error', 'sample',
 CATEGORIES = {'timeout', 'network', 'permission', 'invalid_input', 'other'}
 METRICS = {'writes', 'updateFps', 'sendMs', 'sendP50Ms', 'sendP95Ms', 'sendMaxMs',
            'frameAgeMs', 'lastSuccessAgeMs', 'connectMs', 'connections', 'errors',
-           'timeouts', 'consecutiveErrors', 'rateLimitHz', 'sendSamples', 'deduplicated'}
+           'timeouts', 'consecutiveErrors', 'rateLimitHz', 'transportCeilingHz', 'sendSamples', 'deduplicated'}
 
 
 def utc_now():
@@ -194,7 +194,7 @@ sendMs / sendP95Ms measure command completion, NOT visible bulb response.
 frameAgeMs measures capture-to-command completion, excluding physical bulb fade time.
 updateFps counts changed writes over 3 seconds; a static scene can legitimately show zero.
 sendP50/P95/Max cover the last 120 successful changed writes in this device session.
-Tapo has a conservative 5 Hz command ceiling; capture FPS is a separate measurement.
+Tapo automatically adapts its send rate to replies, up to 10 Hz; capture FPS is separate.
 Describe the exact model/firmware, observed delay, and whether Apply color also lags
 in your accompanying message. Mark issue in the panel when you see the problem.
 '''

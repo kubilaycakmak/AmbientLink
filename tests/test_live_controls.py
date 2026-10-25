@@ -91,3 +91,52 @@ def test_mixed_gamma_gains_and_live_transition_settings_keep_independent_outputs
             assert e.state['devices'][0]['updateFps']>=0
         finally:await e.stop()
     asyncio.run(run())
+
+
+def test_slow_acknowledgement_sends_only_newest_target_next():
+    async def run():
+        entered=asyncio.Event();release=asyncio.Event();second=asyncio.Event()
+        class SlowDevice:
+            rate=10
+            def __init__(self,spec):self.spec=spec;self.sent=[];self.in_flight=0
+            async def connect(self):pass
+            async def send(self,rgb,brightness):
+                self.in_flight+=1
+                assert self.in_flight==1
+                self.sent.append(rgb)
+                if len(self.sent)==1:entered.set();await release.wait()
+                else:second.set()
+                self.in_flight-=1
+                return True
+            async def close(self,restore=True):pass
+        config=validate({'devices':[{'driver':'tapo-l530','address':'192.168.1.50'}]})
+        e=engine.Engine(config,{'tapo-l530':SlowDevice})
+        try:
+            await e.manual([255,0,0]);await asyncio.wait_for(entered.wait(),1)
+            await e.manual([0,255,0]);await e.manual([0,0,255])
+            release.set();await asyncio.wait_for(second.wait(),1)
+            assert e.clients[0].sent[:2]==[(255,0,0),(0,0,255)]
+        finally:release.set();await e.stop()
+    asyncio.run(run())
+
+
+def test_reconnect_time_cannot_spend_the_send_interval(monkeypatch):
+    clock=[1.];starts=[]
+    monkeypatch.setattr(engine.time,'perf_counter',lambda:clock[0])
+    async def inspect_pace(start,rate):
+        starts.append(start)
+        raise asyncio.CancelledError
+    monkeypatch.setattr(engine,'pace',inspect_pace)
+    class Device:
+        rate=10
+        def __init__(self,spec):self.spec=spec
+        async def connect(self):clock[0]+=5
+        async def send(self,*args):return True
+        async def close(self,*args):pass
+    async def run():
+        e=engine.Engine(validate({'devices':[{'driver':'tapo-l530','address':'192.168.1.50'}]}),{'tapo-l530':Device})
+        e.prepare();e.latest=[(100,20,0)]*3
+        try:await e.sender(0)
+        except asyncio.CancelledError:pass
+        assert starts==[6.]
+    asyncio.run(run())

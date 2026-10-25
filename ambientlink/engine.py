@@ -55,7 +55,8 @@ class Engine:
         if not self.settings['devices']:raise ValueError('Add at least one supported light first')
         self.clients=[self.registry[s['driver']](s) for s in self.settings['devices']]
         self.state['devices']=[{'name':s['name'],'connected':False,'error':None,'writes':0,'outputRgb':[0,0,0],
-                               'rateLimitHz':c.rate,'connections':0,'errors':0,'timeouts':0,'deduplicated':0,
+                               'rateLimitHz':c.rate,'transportCeilingHz':getattr(c,'max_rate',c.rate),
+                               'connections':0,'errors':0,'timeouts':0,'deduplicated':0,
                                'transport':getattr(c,'transport','BLE acknowledged' if s['driver']=='govee-h600b' else 'UDP unconfirmed')} for s,c in zip(self.settings['devices'],self.clients)]
 
     async def start(self):
@@ -106,6 +107,9 @@ class Engine:
                         rgb=tuple(max(0,min(255,round(c*g))) for c,g in zip(rgb,spec['gains']))
                     if not spec['enabled']:rgb=(0,0,0)
                     send_at=time.perf_counter()
+                    # A slow reconnect must not spend the next command's pacing
+                    # budget and cause a burst immediately after the first write.
+                    tick=send_at
                     operation_at=send_at
                     phase='send'
                     if await client.send(rgb,self.settings['brightness']):
@@ -121,6 +125,7 @@ class Engine:
                 now=time.perf_counter()
                 while updates and now-updates[0]>3:updates.popleft()
                 row['updateFps']=round(len(updates)/3,1)
+                row['rateLimitHz']=round(client.rate,1)
                 row['lastSuccessAgeMs']=round((now-last_success)*1000,1) if last_success is not None else None
                 # H600B idle sessions need a bounded heartbeat, even on a static scene.
                 if hasattr(client,'bulb') and tick>check_at:
@@ -135,6 +140,7 @@ class Engine:
                 connected=False;failures+=1;updates.clear();row.update(connected=False,error=str(error)[:180],updateFps=0)
                 fields=error_fields(error,'device_failure')
                 row['errors']+=1;row['consecutiveErrors']=failures
+                row['rateLimitHz']=round(client.rate,1)
                 row['errorCode']=fields['code'];row['errorCategory']=fields['category']
                 if fields['category']=='timeout':row['timeouts']+=1
                 self.diagnostics.record('error',light=index+1,phase=phase,retryInSeconds=min(10,failures),
