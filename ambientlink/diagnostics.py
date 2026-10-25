@@ -19,10 +19,14 @@ DRIVERS = {'govee-h600b', 'govee-lan', 'tapo-l530'}
 PHASES = {'connect', 'send', 'heartbeat', 'capture', 'restore', 'api', 'startup', 'background'}
 CODES = {'device_failure', 'capture_failure', 'restore_failure', 'request_failed',
          'startup_failure', 'background_failure', 'tapo_connect', 'tapo_update',
-         'tapo_restore', 'tapo_model', 'tapo_effect', 'tapo_account'}
+         'tapo_restore', 'tapo_model', 'tapo_effect', 'tapo_account',
+         'tapo_timeout', 'tapo_network', 'tapo_auth', 'tapo_locked',
+         'tapo_forbidden', 'tapo_protocol'}
 KINDS = {'session', 'start', 'manual', 'stop', 'connected', 'error', 'sample',
          'issue_marker', 'settings_changed'}
 CATEGORIES = {'timeout', 'network', 'permission', 'invalid_input', 'other'}
+STAGES = {'credentials', 'login', 'device_info'}
+DISCOVERY = {'replied', 'no_reply', 'unavailable'}
 METRICS = {'writes', 'updateFps', 'sendMs', 'sendP50Ms', 'sendP95Ms', 'sendMaxMs',
            'frameAgeMs', 'lastSuccessAgeMs', 'connectMs', 'connections', 'errors',
            'timeouts', 'consecutiveErrors', 'rateLimitHz', 'transportCeilingHz', 'sendSamples', 'deduplicated'}
@@ -42,10 +46,13 @@ def error_category(error):
 
 class DeviceError(ValueError):
     """User-safe message with a stable diagnostic code and no raw cause text."""
-    def __init__(self, message, code, cause=None):
+    def __init__(self, message, code, cause=None, *, category=None, stage=None, discovery=None, retry_after=0):
         super().__init__(message)
         self.code = code
-        self.category = error_category(cause) if cause is not None else 'invalid_input'
+        self.category = category or (error_category(cause) if cause is not None else 'invalid_input')
+        self.stage = stage
+        self.discovery = discovery
+        self.retry_after = retry_after  # None pauses retries until the user restarts control.
 
 
 def error_fields(error, fallback):
@@ -53,10 +60,12 @@ def error_fields(error, fallback):
     category = getattr(error, 'category', error_category(error))
     fields = {'code': code if code in CODES else fallback,
               'category': category if category in CATEGORIES else 'other'}
+    if getattr(error, 'stage', None) in STAGES: fields['stage'] = error.stage
+    if getattr(error, 'discovery', None) in DISCOVERY: fields['discovery'] = error.discovery
     trace = getattr(error, '__traceback__', None)
     while trace:
         source = Path(trace.tb_frame.f_code.co_filename)
-        if source.parent == Path(__file__).parent and source.name in SOURCE_FILES:
+        if (source.parent == Path(__file__).parent or source.parent == Path('ambientlink')) and source.name in SOURCE_FILES:
             fields['source'] = source.name
             fields['line'] = trace.tb_lineno
         trace = trace.tb_next
@@ -97,6 +106,9 @@ def snapshot(config, state):
             if numeric(row.get(key)): item[key] = row[key]
         if row.get('errorCode') in CODES: item['errorCode'] = row['errorCode']
         if row.get('errorCategory') in CATEGORIES: item['errorCategory'] = row['errorCategory']
+        if row.get('errorStage') in STAGES: item['errorStage'] = row['errorStage']
+        if row.get('discovery') in DISCOVERY: item['discovery'] = row['discovery']
+        if type(row.get('retryPaused')) is bool: item['retryPaused'] = row['retryPaused']
         report['devices'].append(item)
     return report
 
@@ -114,6 +126,9 @@ def clean_event(event):
     if event.get('phase') in PHASES: out['phase'] = event['phase']
     if event.get('code') in CODES: out['code'] = event['code']
     if event.get('category') in CATEGORIES: out['category'] = event['category']
+    if event.get('stage') in STAGES: out['stage'] = event['stage']
+    if event.get('discovery') in DISCOVERY: out['discovery'] = event['discovery']
+    if type(event.get('retryPaused')) is bool: out['retryPaused'] = event['retryPaused']
     if type(event.get('light')) is int and 1 <= event['light'] <= 24: out['light'] = event['light']
     for key in ('durationMs', 'retryInSeconds'):
         if numeric(event.get(key)): out[key] = event[key]

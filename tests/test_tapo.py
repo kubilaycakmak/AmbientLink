@@ -137,3 +137,106 @@ def test_shared_screen_defaults_preserve_explicit_calibration():
     customized=validate({**defaults,'smoothing':200,'devices':[{**defaults['devices'][0],'gains':[1,.8,.6],'gamma':True}]})
     assert customized['smoothing']==200 and customized['devices'][0]['gains']==[1,.8,.6]
     assert customized['devices'][0]['gamma'] is True
+
+
+def test_slow_initial_login_survives_old_three_second_limit():
+    device=Device()
+    class Client:
+        def __init__(self,*args,timeout_s):self.timeout=timeout_s
+        async def l530(self,address):
+            await asyncio.wait_for(asyncio.sleep(3.1),self.timeout)
+            return device
+    async def run():
+        driver=TapoL530({'address':'192.168.1.50'},Account(),Client)
+        await driver.connect()
+        assert driver.device is device
+        assert await driver.send((255,0,0),60)
+        assert len(device.sent)==1
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('reply',['target','other','none','error'])
+def test_unicast_wakeup_is_bounded_optional_and_before_login(reply):
+    calls=[];device=Device()
+    class Client:
+        def __init__(self,*args,**kwargs):calls.append('credentials')
+        @staticmethod
+        async def discover_devices_raw(target,timeout_s):
+            assert target=='192.168.1.50' and timeout_s==2
+            calls.append('probe')
+            if reply=='error':raise OSError('private address')
+            async def results():
+                if reply in ('target','other'):
+                    ip=target if reply=='target' else '192.168.1.99'
+                    yield SimpleNamespace(get=lambda:SimpleNamespace(ip=ip))
+            return results()
+        async def l530(self,address):calls.append('login');return device
+    async def run():
+        driver=TapoL530({'address':'192.168.1.50'},Account(),Client)
+        await driver.connect()
+        assert calls==['probe','credentials','login']
+        await driver.send((255,0,0),60)
+        assert calls.count('probe')==1  # Never probe in the color-update loop.
+    asyncio.run(run())
+
+
+def test_stop_cancels_discovery_without_starting_login():
+    calls=[]
+    class Client:
+        def __init__(self,*args,**kwargs):calls.append('login')
+        @staticmethod
+        async def discover_devices_raw(*args,**kwargs):
+            calls.append('probe');await asyncio.Future()
+    async def run():
+        driver=TapoL530({'address':'192.168.1.50'},Account(),Client)
+        task=asyncio.create_task(driver.connect());await asyncio.sleep(.01);task.cancel()
+        with pytest.raises(asyncio.CancelledError):await task
+        assert calls==['probe']
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize('raw,code,category,paused',[
+    ('Http(reqwest::Error { kind: Request, source: TimedOut })','tapo_timeout','timeout',False),
+    ('Http(reqwest::Error { kind: Connect, source: ConnectionRefused })','tapo_network','network',False),
+    ('Tapo(Unauthorized { kind: "HASH_MISMATCH" })','tapo_auth','permission',True),
+    ('Tapo(Unauthorized { kind: "TPAP_CREDENTIALS" })','tapo_auth','permission',True),
+    ('Tapo(Unauthorized { kind: "TPAP_AUTH_ATTEMPTS_LIMIT" })','tapo_locked','permission',True),
+    ('Tapo(Unauthorized { kind: "FORBIDDEN" })','tapo_forbidden','permission',True),
+    ('Tapo(HttpError { status_code: 403 })','tapo_forbidden','permission',True),
+    ('UnsupportedProtocol { protocol: "AES" }','tapo_protocol','invalid_input',True),
+    ('Unknown SDK failure','tapo_connect','other',False),
+])
+def test_generic_rust_exceptions_are_classified_without_leaking_raw_text(raw,code,category,paused):
+    from ambientlink.tapo_driver import tapo_error
+    error=tapo_error(Exception(raw+' private-password local@example.invalid'),'login','replied')
+    assert (error.code,error.category)==(code,category)
+    assert (error.retry_after is None)==paused
+    assert 'private-password' not in str(error) and '@' not in str(error)
+
+
+def test_real_sdk_timeout_is_recognized_against_local_stalled_http_server():
+    import tapo
+    from ambientlink.tapo_driver import tapo_error
+    async def run():
+        writers=[];tasks=[]
+        async def stalled(reader,writer):
+            writers.append(writer);tasks.append(asyncio.current_task())
+            try:
+                await reader.readuntil(b'\r\n\r\n')
+                await asyncio.Future()
+            finally:writer.close()
+        server=await asyncio.start_server(stalled,'127.0.0.1',0)
+        try:
+            client=tapo.ApiClient('local@example.invalid','test-secret',timeout_s=1)
+            with pytest.raises(Exception) as raised:
+                await asyncio.wait_for(client.l530('127.0.0.1:'+str(server.sockets[0].getsockname()[1])),4)
+            # This must exercise the native Rust binding, not our outer deadline.
+            assert not isinstance(raised.value,TimeoutError)
+            assert tapo_error(raised.value).code=='tapo_timeout'
+        finally:
+            server.close()
+            for task in tasks:task.cancel()
+            await asyncio.gather(*tasks,return_exceptions=True)
+            for writer in writers:await writer.wait_closed()
+            await asyncio.wait_for(server.wait_closed(),2)
+    asyncio.run(run())

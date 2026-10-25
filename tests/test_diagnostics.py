@@ -74,8 +74,44 @@ def test_tapo_timeout_preserves_safe_category_without_secret_exception():
         try:await driver.send((255,0,0),50)
         except DeviceError as error:
             assert error_fields(error,'device_failure')['category']=='timeout'
-            assert error.code=='tapo_update' and 'never-export-this' not in str(error)
+            assert error.code=='tapo_timeout' and 'never-export-this' not in str(error)
         else:raise AssertionError('Expected timeout')
+    asyncio.run(run())
+
+
+def test_sdk_errors_keep_safe_reason_stage_and_discovery_through_export():
+    from ambientlink.tapo_driver import tapo_error
+    error=tapo_error(Exception('Http(reqwest::Error { url: "http://192.168.1.81/private-token", source: TimedOut })'),
+                     'login','no_reply')
+    fields=error_fields(error,'device_failure')
+    assert fields['code']=='tapo_timeout' and fields['category']=='timeout'
+    diagnostics=Diagnostics()
+    diagnostics.record('error',phase='connect',**fields)
+    text=content(diagnostics.bundle(snapshot(validate({}),{})))
+    assert '"stage": "login"' in text and '"discovery": "no_reply"' in text
+    assert 'private-token' not in text and '192.168.1.81' not in text
+    diagnostics.record('error',stage='private-token',discovery='192.168.1.81',retryPaused='private-token')
+    assert all(secret not in content(diagnostics.bundle({})) for secret in ('private-token','192.168.1.81'))
+
+
+def test_auth_failure_pauses_sender_without_blocking_stop():
+    from ambientlink.tapo_driver import tapo_error
+    class Device:
+        rate=10
+        def __init__(self,spec):self.calls=0
+        async def connect(self):
+            self.calls+=1
+            raise tapo_error(Exception('Tapo(Unauthorized { kind: "HASH_MISMATCH" })'),'login','replied')
+        async def close(self,restore=True):pass
+    async def run():
+        e=Engine(validate({'devices':[{'driver':'tapo-l530','address':'192.168.1.50'}]}),{'tapo-l530':Device})
+        await e.manual();await asyncio.sleep(.02)
+        client=e.clients[0]
+        assert client.calls==1 and e.state['devices'][0]['retryPaused']
+        event=next(x for x in e.diagnostics.recent() if x['kind']=='error')
+        assert event['retryPaused'] and 'retryInSeconds' not in event
+        await asyncio.wait_for(e.stop(),.5)
+        assert client.calls==1
     asyncio.run(run())
 
 

@@ -95,7 +95,8 @@ class Engine:
                 spec=self.settings['devices'][index]
                 if not connected:
                     connect_at=time.perf_counter()
-                    await client.connect();connected=True;row.update(connected=True,error=None)
+                    await client.connect();connected=True;row.update(connected=True,error=None,retryPaused=False)
+                    for key in ('errorCode','errorCategory','errorStage','discovery'):row.pop(key,None)
                     row['connections']+=1;row['connectMs']=round((time.perf_counter()-connect_at)*1000,1)
                     self.diagnostics.record('connected',light=index+1,durationMs=row['connectMs'])
                 if self.latest is not None:
@@ -142,12 +143,20 @@ class Engine:
                 row['errors']+=1;row['consecutiveErrors']=failures
                 row['rateLimitHz']=round(client.rate,1)
                 row['errorCode']=fields['code'];row['errorCategory']=fields['category']
+                for source,target in (('stage','errorStage'),('discovery','discovery')):
+                    row.pop(target,None)
+                    if source in fields:row[target]=fields[source]
+                retry_after=getattr(error,'retry_after',0)
+                row['retryPaused']=retry_after is None
+                retry_delay=max(min(10,failures),retry_after or 0)
                 if fields['category']=='timeout':row['timeouts']+=1
-                self.diagnostics.record('error',light=index+1,phase=phase,retryInSeconds=min(10,failures),
+                self.diagnostics.record('error',light=index+1,phase=phase,retryPaused=row['retryPaused'],
+                                        **({} if row['retryPaused'] else {'retryInSeconds':retry_delay}),
                                         durationMs=round((time.perf_counter()-operation_at)*1000,1),**fields)
                 try:await client.close(False)
                 except Exception:pass  # A failed disconnect must not disable reconnects.
-                await asyncio.sleep(min(10,failures))
+                if row['retryPaused']:await asyncio.Future()  # Cancelled by Stop/account change; no repeated bad logins.
+                else:await asyncio.sleep(retry_delay)
 
     async def stream(self):
         tasks=[asyncio.create_task(self.sender(i)) for i in range(len(self.clients))]

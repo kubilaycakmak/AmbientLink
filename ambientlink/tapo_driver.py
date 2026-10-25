@@ -1,9 +1,42 @@
 """Experimental L530/L530E local LAN adapter using the MIT tapo client."""
 import asyncio
 import colorsys
+import re
 import time
 from .led_color import led_output
 from .diagnostics import DeviceError
+
+
+def tapo_error(error, stage=None, discovery=None, code='tapo_connect'):
+    # tapo's Rust binding wraps every error in a generic Python Exception.
+    # Recognize fixed SDK markers locally; never retain/export its raw text,
+    # which can contain URLs, credentials or device identifiers.
+    raw=str(error)
+    category=None;retry_after=5
+    message='Tapo connection failed. Check bulb IP, local network and account; download diagnostics for details.'
+    if 'TPAP_AUTH_ATTEMPTS_LIMIT' in raw:
+        code='tapo_locked';category='permission';retry_after=None
+        message='Tapo locked logins after failed attempts. Retries paused. Stop, check the account, wait for the lock to expire, then restart.'
+    elif any(marker in raw for marker in ('HASH_MISMATCH','TPAP_CREDENTIALS')):
+        code='tapo_auth';category='permission';retry_after=None
+        message='Tapo rejected the account. Retries paused. Stop, save the exact Tapo email/password (case-sensitive), then restart.'
+    elif 'FORBIDDEN' in raw or re.search(r'status_code:\s*403\b',raw):
+        code='tapo_forbidden';category='permission';retry_after=None
+        message='Tapo denied local access (403). Retries paused. Check Third-Party Compatibility in Tapo, then stop and restart control.'
+    elif 'UnsupportedProtocol' in raw:
+        code='tapo_protocol';category='invalid_input';retry_after=None
+        message='This Tapo firmware login protocol is unsupported. Retries paused. Download diagnostics and report the bulb firmware version.'
+    elif isinstance(error,TimeoutError) or (raw.startswith('Http(') and any(marker in raw.lower() for marker in ('timedout','timed out','timeout'))):
+        code='tapo_timeout';category='timeout'
+        message='Tapo local connection timed out. Check the current bulb IP, PC LAN access and VPN/guest-network isolation. Retrying.'
+    elif isinstance(error,OSError) or raw.startswith('Http('):
+        code='tapo_network';category='network'
+        message='Tapo local network request failed. Check bulb IP and PC LAN access; allow local traffic through VPN/firewall. Retrying.'
+    if stage=='device_info' and code=='tapo_timeout':
+        message='Tapo login succeeded, but reading bulb settings timed out. Retrying; download diagnostics if this repeats.'
+    if stage is None and code=='tapo_update':
+        message='Tapo did not acknowledge the light update; reconnecting'
+    return DeviceError(message,code,error,category=category,stage=stage,discovery=discovery,retry_after=retry_after)
 
 
 class TapoL530:
@@ -27,18 +60,28 @@ class TapoL530:
 
     async def connect(self):
         if self.credentials is None:raise DeviceError('Use Add Tapo to save your Tapo account first','tapo_account')
-        credentials=self.credentials.read()
         if self.factory is None:
             from tapo import ApiClient
             factory=ApiClient
         else:factory=self.factory
+        stage='credentials';discovery='unavailable'
         try:
-            self.client=factory(credentials['username'],credentials['password'],timeout_s=3)
-            device=await asyncio.wait_for(self.client.l530(self.spec['address']),10)
-            info=await asyncio.wait_for(device.get_device_info(),5)
+            credentials=self.credentials.read()
+            # A few firmwares only enable local HTTP after a discovery query.
+            # Unicast to the configured bulb only, without account credentials.
+            # No UDP reply must not block an otherwise working HTTP connection.
+            discovery=await self.wake_local_api(factory)
+            stage='login'
+            self.client=factory(credentials['username'],credentials['password'],timeout_s=10)
+            device=await asyncio.wait_for(self.client.l530(self.spec['address']),30)
+            stage='device_info'
+            info=await asyncio.wait_for(device.get_device_info(),10)
         except Exception as error:
             self.client=None;self.device=None
-            raise DeviceError('Tapo connection failed: check local IP, account, Wi-Fi and third-party compatibility setting','tapo_connect',error) from None
+            if stage=='credentials':
+                raise DeviceError('Tapo account could not be read. Stop, save it again with Add Tapo, then restart.',
+                                  'tapo_account',error,stage=stage,retry_after=None) from None
+            raise tapo_error(error,stage,discovery) from None
         model=info.model.upper().split('(')[0].strip()
         if model not in ('L530','L530E'):
             self.client=None
@@ -49,6 +92,17 @@ class TapoL530:
         if self.original is None:
             self.original={k:getattr(info,k) for k in ('device_on','brightness','color_temp','hue','saturation')}
         self.device=device;self.last=None
+
+    async def wake_local_api(self,factory):
+        if not hasattr(factory,'discover_devices_raw'):return 'unavailable'
+        async def probe():
+            stream=await factory.discover_devices_raw(self.spec['address'],timeout_s=2)
+            async for candidate in stream:
+                if candidate.get().ip==self.spec['address']:return 'replied'
+            return 'no_reply'
+        try:return await asyncio.wait_for(probe(),2.5)
+        except TimeoutError:return 'no_reply'
+        except Exception:return 'unavailable'
 
     async def send(self,rgb,brightness):
         if self.device is None:await self.connect()
@@ -73,7 +127,7 @@ class TapoL530:
         except Exception as error:
             self.rate=max(1,self.rate/2)
             self.rate_hold_until=time.perf_counter()+10
-            raise DeviceError('Tapo did not acknowledge the light update; reconnecting','tapo_update',error) from None
+            raise tapo_error(error,code='tapo_update') from None
         self.last=value
         return True
 

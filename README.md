@@ -3,15 +3,15 @@
 Turn supported RGB lights into Windows screen lighting. Runs locally from one
 EXE and opens a control panel in your browser. No Echo, Home Assistant or separate server is required. Govee needs no account; Tapo uses your Tapo account to authenticate directly with the light on your local network.
 
-**0.3.1 alpha — Windows 10/11 x64, primary monitor only.** The H600B transport
+**0.3.2 alpha — Windows 10/11 x64, primary monitor only.** The H600B transport
 comes from a working hardware setup; this standalone app is an early release,
 not universal RGB support. Govee LAN output still needs physical validation.
 
 ## Download for Windows
 
-**[Download AmbientLink 0.3.1 for Windows x64](https://github.com/kubilaycakmak/AmbientLink/releases/download/v0.3.1/AmbientLink-0.3.1-windows-x64.zip)**
+**[Download AmbientLink.exe](https://github.com/kubilaycakmak/AmbientLink/releases/download/v0.3.2/AmbientLink.exe)** · [ZIP with licenses and README](https://github.com/kubilaycakmak/AmbientLink/releases/download/v0.3.2/AmbientLink-0.3.2-windows-x64.zip)
 
-[Release notes and all downloads](https://github.com/kubilaycakmak/AmbientLink/releases/tag/v0.3.1)
+[Release notes and all downloads](https://github.com/kubilaycakmak/AmbientLink/releases/tag/v0.3.2)
 · [All releases](https://github.com/kubilaycakmak/AmbientLink/releases)
 
 Download the **Windows ZIP above**, not GitHub's automatically generated
@@ -20,7 +20,7 @@ Download the **Windows ZIP above**, not GitHub's automatically generated
 with it. Python is bundled; no separate Python installation is needed.
 
 The EXE opens a local control panel in your default browser. That browser tab
-is the app's interface; there is no separate native window or tray icon in 0.3.1.
+is the app's interface; there is no separate native window or tray icon in 0.3.2.
 No administrator access is required for normal use. Tapo requires its account credentials.
 
 The build is unsigned. Windows SmartScreen may show an unknown-publisher warning.
@@ -166,6 +166,37 @@ credential file. Local history lives in `%LOCALAPPDATA%\AmbientLink\diagnostics`
 and rotates between two 256 KiB files; exports include at most 500 recent events.
 To erase local history, quit AmbientLink and delete that diagnostics folder.
 
+### Tapo cannot connect
+
+Version 0.3.2 fixes an overly short **3-second HTTP timeout during login**. Initial
+HTTP requests now allow 10 seconds, with a 30-second overall login limit and a
+separate 10-second settings read. Color updates still have a 3-second deadline;
+the startup allowance does not queue delayed colors or slow normal sends.
+
+Before login, a bounded **unicast discovery query** targets only the configured
+bulb IP. This can wake the local API on firmware that starts it after discovery.
+It sends no account credentials and does not re-pair or reset the bulb. If UDP
+does not reply, normal HTTP login is still attempted. A discovery reply alone
+does not prove that HTTP authentication will work.
+
+- **Connection timed out / network request failed:** verify the current bulb IP
+  in the router or Tapo app. The PC must be able to reach the bulb locally;
+  successful phone/cloud control does not prove that. Check guest Wi-Fi/client
+  isolation and whether the VPN permits local LAN traffic.
+- **Account rejected:** stop control and save the exact case-sensitive Tapo
+  email/password again through Add Tapo. Then restart screen sync.
+- **Local access denied (403):** check Third-Party Compatibility in the Tapo app
+  if available for that firmware, then stop and restart control.
+- **Login locked / unsupported protocol:** repeated login attempts are paused.
+  For a lockout, correct the account and allow the bulb's lockout to expire before
+  restarting. For unsupported firmware, share diagnostics and the firmware version.
+
+Reports now distinguish timeout, network, account, access-denied, lockout and
+unsupported-protocol errors, plus the login/settings-read stage and whether
+discovery replied. Raw SDK messages and private network details remain excluded.
+If the problem continues, send a **new report from 0.3.2**: older reports cannot
+recover details that were already removed. Real Tapo hardware remains unverified.
+
 ### Tapo is slow: what to compare
 
 L530E uses local 2.4 GHz Wi-Fi. Wi-Fi itself does not establish whether a light is
@@ -198,7 +229,7 @@ Download `SHA256SUMS.txt` from the same release. In PowerShell, compute the ZIP'
 hash and compare it with the matching filename in that checksum file:
 
 ```powershell
-Get-FileHash .\AmbientLink-0.3.1-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\AmbientLink-0.3.2-windows-x64.zip -Algorithm SHA256
 ```
 
 ## Performance and privacy
