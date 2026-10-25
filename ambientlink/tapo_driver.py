@@ -2,6 +2,7 @@
 import asyncio
 import colorsys
 from .led_color import led_output
+from .diagnostics import DeviceError
 
 
 class TapoL530:
@@ -13,7 +14,7 @@ class TapoL530:
         self.client=None;self.device=None;self.original=None;self.last=None
 
     async def connect(self):
-        if self.credentials is None:raise ValueError('Use Add Tapo to save your Tapo account first')
+        if self.credentials is None:raise DeviceError('Use Add Tapo to save your Tapo account first','tapo_account')
         credentials=self.credentials.read()
         if self.factory is None:
             from tapo import ApiClient
@@ -23,16 +24,16 @@ class TapoL530:
             self.client=factory(credentials['username'],credentials['password'],timeout_s=3)
             device=await asyncio.wait_for(self.client.l530(self.spec['address']),10)
             info=await asyncio.wait_for(device.get_device_info(),5)
-        except Exception:
+        except Exception as error:
             self.client=None;self.device=None
-            raise ValueError('Tapo connection failed: check local IP, account, Wi-Fi and third-party compatibility setting') from None
+            raise DeviceError('Tapo connection failed: check local IP, account, Wi-Fi and third-party compatibility setting','tapo_connect',error) from None
         model=info.model.upper().split('(')[0].strip()
         if model not in ('L530','L530E'):
             self.client=None
-            raise ValueError('This adapter is for Tapo L530/L530E only')
+            raise DeviceError('This adapter is for Tapo L530/L530E only','tapo_model')
         if info.dynamic_light_effect_enable:
             self.client=None
-            raise ValueError('Choose a solid color in the Tapo app first; dynamic effects are not restored')
+            raise DeviceError('Choose a solid color in the Tapo app first; dynamic effects are not restored','tapo_effect')
         if self.original is None:
             self.original={k:getattr(info,k) for k in ('device_on','brightness','color_temp','hue','saturation')}
         self.device=device;self.last=None
@@ -55,8 +56,8 @@ class TapoL530:
                 request=(request.color_temperature(6500) if saturation==0 else request.hue_saturation(hue,saturation))
                 request=request.brightness(dim).on()
             await asyncio.wait_for(request.send(self.device),3)
-        except Exception:
-            raise ValueError('Tapo did not acknowledge the light update; reconnecting') from None
+        except Exception as error:
+            raise DeviceError('Tapo did not acknowledge the light update; reconnecting','tapo_update',error) from None
         self.last=value
         return True
 
@@ -72,6 +73,6 @@ class TapoL530:
                 request=request.brightness(max(1,state['brightness']))
                 request=request.on() if state['device_on'] else request.off()
                 await asyncio.wait_for(request.send(self.device),3)
-        except Exception:
-            raise ValueError('Tapo could not restore its previous light setting') from None
+        except Exception as error:
+            raise DeviceError('Tapo could not restore its previous light setting','tapo_restore',error) from None
         finally:self.device=None;self.client=None;self.last=None

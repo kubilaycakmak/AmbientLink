@@ -17,6 +17,15 @@ from .drivers import discover
 from .engine import Engine
 from .credentials import Credentials
 from .tapo_driver import TapoL530
+from .diagnostics import Diagnostics, snapshot as support_snapshot, error_fields
+
+
+async def sample_diagnostics(engine):
+    while True:
+        if engine.state['mode'] != 'idle':
+            sample=support_snapshot(engine.settings,engine.state)
+            await asyncio.to_thread(engine.diagnostics.record,'sample',sample=sample)
+        await asyncio.sleep(10)
 
 
 def run_loop(loop):
@@ -35,9 +44,10 @@ def create_server(root,loop,engine):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*args):pass
         def setup(self):super().setup();self.connection.settimeout(10)
-        def reply(self,code,data,kind='application/json'):
+        def reply(self,code,data,kind='application/json',filename=None):
             raw=json.dumps(data,allow_nan=False).encode() if kind=='application/json' else data
-            self.send_response(code);self.send_header('Content-Type',kind+'; charset=utf-8')
+            self.send_response(code);self.send_header('Content-Type',kind+('' if kind=='application/zip' else '; charset=utf-8'))
+            if filename:self.send_header('Content-Disposition',f'attachment; filename="{filename}"')
             self.send_header('Content-Length',str(len(raw)));self.send_header('Cache-Control','no-store')
             self.send_header('X-Frame-Options','DENY');self.send_header('X-Content-Type-Options','nosniff')
             self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'")
@@ -66,6 +76,14 @@ def create_server(root,loop,engine):
                 if not 0<size<=65536:raise ValueError('Request too large')
                 body=json.loads(self.rfile.read(size))
                 if not isinstance(body,dict):raise ValueError('Invalid request')
+                if self.path in ('/api/diagnostics/export','/api/diagnostics/mark'):
+                    async def diagnostic_snapshot():return support_snapshot(engine.settings,engine.state)
+                    safe=asyncio.run_coroutine_threadsafe(diagnostic_snapshot(),loop).result(timeout=3)
+                    if self.path.endswith('/mark'):
+                        engine.diagnostics.record('issue_marker',sample=safe)
+                        return self.reply(200,{'ok':True})
+                    return self.reply(200,engine.diagnostics.bundle(safe),'application/zip',
+                                      'AmbientLink-diagnostics-'+__version__+'.zip')
                 async def command():
                     async with engine.lock:
                         if self.path=='/api/tapo/account':
@@ -91,7 +109,9 @@ def create_server(root,loop,engine):
                 future=asyncio.run_coroutine_threadsafe(command(),loop)
                 result=future.result(timeout=60)
                 self.reply(200,result)
-            except Exception as error:self.reply(400,{'error':str(error)[:240]})
+            except Exception as error:
+                engine.diagnostics.record('error',phase='api',**error_fields(error,'request_failed'))
+                self.reply(400,{'error':str(error)[:240]})
     return ThreadingHTTPServer(('127.0.0.1',0),Handler)
 
 
@@ -108,11 +128,17 @@ def main():
             if type(port)is int and 1024<=port<=65535:webbrowser.open(f'http://127.0.0.1:{port}/')
         except (OSError,ValueError,KeyError):pass
         return
+    diagnostics=Diagnostics(root)
     loop=asyncio.new_event_loop();loop.time=__import__('time').perf_counter
     loop._clock_resolution=__import__('time').get_clock_info('perf_counter').resolution
     thread=threading.Thread(target=run_loop,args=(loop,),daemon=True);thread.start()
+    sampler=None
     try:
-        config=settings.load(root/'settings.json');engine=Engine(config)
+        config=settings.load(root/'settings.json');engine=Engine(config,diagnostics=diagnostics)
+        def background_error(_loop,context):
+            diagnostics.record('error',phase='background',**error_fields(context.get('exception'),'background_failure'))
+        loop.set_exception_handler(background_error)
+        sampler=asyncio.run_coroutine_threadsafe(sample_diagnostics(engine),loop)
         server=create_server(root,loop,engine)
         (root/'instance.json').write_text(json.dumps({'port':server.server_port}))
         if '--no-browser' not in sys.argv:webbrowser.open(f'http://127.0.0.1:{server.server_port}/')
@@ -121,9 +147,12 @@ def main():
             asyncio.run_coroutine_threadsafe(engine.stop(),loop).result(timeout=30)
             server.server_close()
     except Exception as error:
-        (root/'last-error.txt').write_text(type(error).__name__+': '+str(error))
+        fields=error_fields(error,'startup_failure');diagnostics.record('error',phase='startup',**fields)
+        (root/'last-error.txt').write_text(json.dumps(fields),encoding='utf-8')
         ctypes.windll.user32.MessageBoxW(None,str(error),'AmbientLink could not start',0x10)
     finally:
+        if sampler:sampler.cancel()
         (root/'instance.json').unlink(missing_ok=True)
         loop.call_soon_threadsafe(loop.stop);thread.join(timeout=5)
+        diagnostics.close()
         if mutex:kernel.CloseHandle(ctypes.c_void_p(mutex))

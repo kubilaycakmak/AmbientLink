@@ -3,15 +3,15 @@
 Turn supported RGB lights into Windows screen lighting. Runs locally from one
 EXE and opens a control panel in your browser. No Echo, Home Assistant or separate server is required. Govee needs no account; Tapo uses your Tapo account to authenticate directly with the light on your local network.
 
-**0.2.2 alpha — Windows 10/11 x64, primary monitor only.** The H600B transport
+**0.3.0 alpha — Windows 10/11 x64, primary monitor only.** The H600B transport
 comes from a working hardware setup; this standalone app is an early release,
 not universal RGB support. Govee LAN output still needs physical validation.
 
 ## Download for Windows
 
-**[Download AmbientLink 0.2.2 for Windows x64](https://github.com/kubilaycakmak/AmbientLink/releases/download/v0.2.2/AmbientLink-0.2.2-windows-x64.zip)**
+**[Download AmbientLink 0.3.0 for Windows x64](https://github.com/kubilaycakmak/AmbientLink/releases/download/v0.3.0/AmbientLink-0.3.0-windows-x64.zip)**
 
-[Release notes and all downloads](https://github.com/kubilaycakmak/AmbientLink/releases/tag/v0.2.2)
+[Release notes and all downloads](https://github.com/kubilaycakmak/AmbientLink/releases/tag/v0.3.0)
 · [All releases](https://github.com/kubilaycakmak/AmbientLink/releases)
 
 Download the **Windows ZIP above**, not GitHub's automatically generated
@@ -20,7 +20,7 @@ Download the **Windows ZIP above**, not GitHub's automatically generated
 with it. Python is bundled; no separate Python installation is needed.
 
 The EXE opens a local control panel in your default browser. That browser tab
-is the app's interface; there is no separate native window or tray icon in 0.2.2.
+is the app's interface; there is no separate native window or tray icon in 0.3.0.
 No administrator access is required for normal use. Tapo requires its account credentials.
 
 The build is unsigned. Windows SmartScreen may show an unknown-publisher warning.
@@ -143,10 +143,47 @@ restore behavior intentionally when handing control back to another application.
 | Capture stops or reports an error | Unlock Windows and click Start screen sync again. Protected video, remote sessions and display changes can prevent DXGI capture. |
 | The browser says App disconnected | Run AmbientLink.exe again. Closing the app ends its local web server. |
 
-When reporting a problem, include your Windows version, exact bulb model and
-firmware, Bluetooth/LAN transport, and the visible error message. Remove device
-addresses and personal labels from screenshots or settings before sharing them.
-[Open an issue](https://github.com/kubilaycakmak/AmbientLink/issues).
+### Share a diagnostic report
+
+1. Open the **Troubleshooting** card below Connected lights.
+2. Run the scene that shows the problem for **30–60 seconds**. Click **Mark issue
+   now** when you notice a delay, flicker or connection failure.
+3. Click **Download diagnostics**. Share the downloaded ZIP with the maintainer
+   or attach it to a [GitHub issue](https://github.com/kubilaycakmak/AmbientLink/issues).
+4. In your message, include the exact bulb model/firmware, roughly how many
+   milliseconds or seconds it lags, and whether **Apply color** also feels slow.
+
+The ZIP includes app/Windows versions, tuning settings, per-light timing and
+error counters, safe error codes/source locations, and recent samples taken every
+10 seconds while controlling lights. An issue marker captures an extra sample.
+Lights are numbered in panel order. Errors and connection events are recorded
+when they happen; the report can include previous sessions.
+
+**Nothing is uploaded automatically.** Reports exclude passwords, tokens, account
+email, IP/MAC addresses, device names, computer/user names, full paths, raw exception
+messages, screenshots and sampled colors. They do not copy `settings.json` or the
+credential file. Local history lives in `%LOCALAPPDATA%\AmbientLink\diagnostics`
+and rotates between two 256 KiB files; exports include at most 500 recent events.
+To erase local history, quit AmbientLink and delete that diagnostics folder.
+
+### Tapo is slow: what to compare
+
+L530E uses local 2.4 GHz Wi-Fi. Wi-Fi itself does not establish whether a light is
+faster or slower than Bluetooth. This adapter waits for command acknowledgement
+and deliberately caps sends at **5 Hz** (at least 200 ms between command starts).
+Slower replies reduce the rate further. Capture FPS, the Transition setting, the
+network, device processing and firmware fade behavior can all contribute to what
+you see. This release adds measurements; it does **not** claim to fix a physically
+unverified Tapo latency problem or increase that limit.
+
+- Compare **Apply color** with screen sync. Manual color skips screen capture and
+  interpolation, helping separate those from transport/device delay.
+- Read **ms last**, **ms P95**, errors and reconnects in the light's row. P95 is
+  the 95th-percentile send time over the last 120 successful changed writes.
+- Try one bulb on the same reachable network with other light controllers closed.
+  If sends take seconds or repeatedly time out, export diagnostics while it happens.
+- A low command time with a visibly slow physical response needs a description or
+  optional video from the user: the app cannot measure the bulb's optical response.
 
 ### Verify a download
 
@@ -154,7 +191,7 @@ Download `SHA256SUMS.txt` from the same release. In PowerShell, compute the ZIP'
 hash and compare it with the matching filename in that checksum file:
 
 ```powershell
-Get-FileHash .\AmbientLink-0.2.2-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\AmbientLink-0.3.0-windows-x64.zip -Algorithm SHA256
 ```
 
 ## Performance and privacy
@@ -175,8 +212,9 @@ video colors. A stable target completes a finite ramp rather than trailing for
 seconds. Full black still fades quickly. The H600B version of this algorithm was
 compared on a live three-bulb setup; this does not validate every adapter or firmware.
 
-Each device row shows **updates/s** for changed outputs over the last three seconds
-and **ms last send** for the last transport write. These are local diagnostics, not
+Each device row shows **updates/s** against its transport ceiling, **ms last**,
+**ms P95**, errors and reconnects. Updates/s counts changed outputs over the last
+three seconds. These are local diagnostics, not
 optical measurements or a guaranteed hardware refresh rate. A static scene can
 correctly show zero updates/s. UDP output remains unconfirmed.
 

@@ -5,6 +5,8 @@ import urllib.request
 import urllib.error
 import pytest
 import re
+import io
+import zipfile
 from ambientlink.app import create_server
 from ambientlink.engine import Engine
 from ambientlink.settings import validate
@@ -27,6 +29,9 @@ def test_local_panel_enforces_host_origin_and_csrf(tmp_path):
         assert error.value.code==403
         html=urllib.request.urlopen(base+'/').read().decode()
         token=re.search("const token='([^']+)'",html).group(1)
+        req=urllib.request.Request(base+'/api/diagnostics/export',data=b'{}',headers={'Origin':base})
+        with pytest.raises(urllib.error.HTTPError) as error:urllib.request.urlopen(req)
+        assert error.value.code==403
         req=urllib.request.Request(base+'/api/tapo/account',
             data=b'{"username":"local@example.invalid","password":"test-secret"}',
             headers={'Origin':base,'X-CSRF-Token':token,'Content-Type':'application/json'})
@@ -36,6 +41,18 @@ def test_local_panel_enforces_host_origin_and_csrf(tmp_path):
             snapshot=urllib.request.urlopen(base+'/api/state').read()
             assert b'test-secret' not in snapshot and b'local@example.invalid' not in snapshot
             assert json.loads(snapshot)['tapoAccountSaved'] is True
+        headers={'Origin':base,'X-CSRF-Token':token,'Content-Type':'application/json'}
+        req=urllib.request.Request(base+'/api/diagnostics/mark',data=b'{}',headers=headers)
+        assert json.load(urllib.request.urlopen(req))=={'ok':True}
+        req=urllib.request.Request(base+'/api/diagnostics/export',data=b'{}',headers=headers)
+        with urllib.request.urlopen(req) as response:
+            assert response.headers['Content-Type']=='application/zip'
+            assert 'attachment;' in response.headers['Content-Disposition']
+            with zipfile.ZipFile(io.BytesIO(response.read())) as archive:
+                assert 'issue_marker' in archive.read('recent-events.jsonl').decode()
+                payload=b''.join(archive.read(name) for name in archive.namelist())
+                assert b'test-secret' not in payload and b'local@example.invalid' not in payload
+                assert token.encode() not in payload
         req=urllib.request.Request(base+'/',headers={'Host':'evil.example'})
         with pytest.raises(urllib.error.HTTPError) as error:urllib.request.urlopen(req)
         assert error.value.code==403
